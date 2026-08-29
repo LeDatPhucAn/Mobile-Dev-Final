@@ -30,7 +30,7 @@ class MobileClipTokenizer(assets: AssetManager, private val config: MobileClipMo
             vocabulary = vocabularyJson.keys().asSequence().associateWith { vocabularyJson.getLong(it) }
 
             val merges = assets.open(config.tokenizerMergesAsset).bufferedReader(Charsets.UTF_8).useLines { lines ->
-                lines.filter { it.isNotBlank() && !it.startsWith("#") }
+                lines.filter { it.isNotBlank() && !it.startsWith("#version:") }
                     .map { line -> line.trim().split(Regex("\\s+")) }
                     .filter { it.size == 2 }
                     .toList()

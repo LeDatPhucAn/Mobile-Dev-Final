@@ -54,36 +54,38 @@ Place assets under `app/src/main/assets/models/`:
 
 The image and text graphs must come from the same MobileCLIP2-S0 checkpoint and both output exactly 512 Float32 values. Each session is initialized lazily once and retained for the application process. Image and text inference are individually serialized with a `Mutex` until device profiling justifies safe parallelism.
 
-The config is deliberately not supplied with guessed values. It must be generated or manually verified against the actual export and contain:
+The config is generated alongside the graphs and is the runtime contract. Its top-level structure is:
 
 ```json
 {
-  "imageInputName": "EXPORT_VALUE_REQUIRED",
-  "imageOutputName": "EXPORT_VALUE_REQUIRED",
-  "imageInputSize": 0,
-  "imageLayout": "NCHW_OR_NHWC",
-  "imageMean": [0.0, 0.0, 0.0],
-  "imageStd": [0.0, 0.0, 0.0],
-  "resizeMode": "center_crop",
-  "textInputName": "EXPORT_VALUE_REQUIRED",
-  "textAttentionMaskName": "OPTIONAL_EXPORT_VALUE",
-  "textOutputName": "EXPORT_VALUE_REQUIRED",
-  "contextLength": 0,
-  "tokenizerType": "clip_byte_bpe_v1",
-  "tokenizerVocabularyAsset": "models/EXPORT_VOCAB_FILE.json",
-  "tokenizerMergesAsset": "models/EXPORT_MERGES_FILE.txt",
-  "lowercaseText": false,
-  "collapseWhitespace": false,
-  "startTokenId": 0,
-  "endTokenId": 0,
-  "padTokenId": 0,
-  "embeddingDimension": 512
+  "format_version": 1,
+  "model": { "name": "MobileCLIP2-S0", "embedding_dimension": 512 },
+  "image_encoder": {
+    "input_name": "pixel_values",
+    "output_name": "image_embedding",
+    "layout": "NCHW",
+    "image_size": 256,
+    "preprocessing": {
+      "resize_mode": "shortest",
+      "interpolation": "bicubic",
+      "center_crop": true,
+      "divide_uint8_by_255": true
+    }
+  },
+  "text_encoder": {
+    "input_name": "input_ids",
+    "output_name": "text_embedding",
+    "input_dtype": "int64",
+    "context_length": 77
+  },
+  "tokenizer": { "type": "open_clip_simple_tokenizer" },
+  "tokenizer_test_vectors": []
 }
 ```
 
-The zeros and labels above are documentation placeholders, not valid model values. `MobileClipModelConfig` checks this exporter-owned contract, `MobileClipPreprocessor` obeys its layout/size/normalization, and `MobileClipTokenizer` only accepts the explicitly declared CLIP byte-BPE contract. Graph input/output names are checked against ONNX Runtime before inference. Missing or inconsistent assets produce a visible model-unavailable state; no random vector, MobileNet, or alternate CLIP fallback exists.
+This excerpt omits additional required fields; `mobileclip2_s0_config.json` is the complete schema. `MobileClipModelConfig` validates graph shapes/types, preprocessing, tokenizer metadata, and generated token-ID vectors. `MobileClipPreprocessor` performs the declared shortest-edge bicubic resize and center crop, and `MobileClipTokenizer` implements the declared OpenCLIP byte-BPE pipeline. Graph input/output names are checked against ONNX Runtime before inference. Missing or inconsistent assets produce a visible model-unavailable state; no random vector, MobileNet, or alternate CLIP fallback exists.
 
-The ONNX graph metadata is also authoritative for tensor element types: image input must report Float32, while text IDs and an optional attention mask may report Int32 or Int64. The adapter creates tensors to match that metadata rather than assuming an integer width.
+The exported graph contract is strict: image input is Float32 NCHW and text input is Int64 token IDs with no attention-mask input. Both outputs are Float32 512-D embeddings.
 
 ## Vector storage and search
 
@@ -119,7 +121,7 @@ For a real phone: install the debug APK, grant all or selected photo access, con
 
 ## Current limitations
 
-- MobileCLIP2-S0 ONNX graphs and exporter-specific config/tokenizer data are not checked into this repository, so semantic indexing/search intentionally remains unavailable until those licensed/verified assets are supplied.
+- The large MobileCLIP2-S0 ONNX graphs are intentionally gitignored. A fresh clone requires the two exporter-validated graph files before semantic indexing/search is available; the generated config and tokenizer assets are included.
 - V1 indexes accessible images only. The schema supports `VIDEO`, but representative video thumbnails and `READ_MEDIA_VIDEO` permission are not enabled yet.
 - Album rows are real MediaStore buckets and system collections; album-specific browsing/editing and “add to album” are not implemented.
 - Search is exact and intentionally capped to the top 100 rendered results. This is appropriate for the target 5,000–30,000 items but should be profiled on target hardware.
