@@ -20,8 +20,7 @@ class MobileClipTokenizer(assets: AssetManager, private val config: MobileClipMo
     init {
         try {
             require(config.tokenizerType == "open_clip_simple_tokenizer")
-            val flags = Pattern.UNICODE_CHARACTER_CLASS or
-                if (config.tokenizerPatternIgnoreCase) Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE else 0
+            val flags = if (config.tokenizerPatternIgnoreCase) Pattern.CASE_INSENSITIVE else 0
             tokenPattern = Pattern.compile(config.tokenizerPattern, flags)
 
             val vocabularyJson = assets.open(config.tokenizerVocabularyAsset)
