@@ -1,0 +1,53 @@
+package com.example.mobile_image_retrieval.domain.model
+
+enum class MediaType { IMAGE, VIDEO }
+
+data class MediaItem(
+    val mediaId: Long,
+    val uri: String,
+    val mediaType: MediaType,
+    val displayName: String?,
+    val dateTaken: Long?,
+    val dateAdded: Long?,
+    val dateModified: Long,
+    val width: Int?,
+    val height: Int?,
+    val mimeType: String?,
+    val bucketId: String?,
+    val bucketName: String?,
+)
+
+enum class TimeRange { ANY_TIME, TODAY, YESTERDAY, THIS_WEEK, THIS_MONTH, CUSTOM }
+enum class ResultSort { MOST_RELEVANT, NEWEST_FIRST, OLDEST_FIRST }
+
+data class SearchFilters(
+    val timeRange: TimeRange = TimeRange.ANY_TIME,
+    val sort: ResultSort = ResultSort.MOST_RELEVANT,
+    val mediaType: MediaType? = null,
+    val customStartMillis: Long? = null,
+    val customEndExclusiveMillis: Long? = null,
+)
+
+data class SearchResult(val media: MediaItem, val rawSimilarity: Float)
+
+data class Album(
+    val id: String,
+    val name: String,
+    val count: Int,
+    val coverUri: String?,
+    val isSystemCollection: Boolean = false,
+)
+
+sealed interface IndexingStatus {
+    data object Idle : IndexingStatus
+    data class Running(val indexed: Int, val total: Int) : IndexingStatus
+    data class Interrupted(val indexed: Int, val total: Int) : IndexingStatus
+    data class Unavailable(val reason: String) : IndexingStatus
+}
+
+sealed interface UiError {
+    data class ModelUnavailable(val message: String) : UiError
+    data class Permission(val message: String) : UiError
+    data class Search(val message: String) : UiError
+    data class Storage(val message: String) : UiError
+}
