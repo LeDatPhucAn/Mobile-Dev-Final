@@ -3,8 +3,6 @@
 package com.example.mobile_image_retrieval.ui.screens
 
 import android.text.format.DateUtils
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,20 +26,13 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Cancel
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -49,12 +40,10 @@ import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DateRangePicker
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -74,12 +63,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import com.example.mobile_image_retrieval.ai.MatchScoreFormatter
 import com.example.mobile_image_retrieval.data.db.SearchHistoryEntity
 import com.example.mobile_image_retrieval.domain.model.Album
 import com.example.mobile_image_retrieval.domain.model.IndexingStatus
@@ -94,7 +81,6 @@ import com.example.mobile_image_retrieval.ui.SearchUiState
 import com.example.mobile_image_retrieval.ui.theme.PhotoSearchTheme
 import java.time.Instant
 import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
 
 private val Suggestions = listOf("beach with friends", "sunset", "my birthday", "dog playing", "mountain trip", "coffee time")
 
@@ -106,6 +92,7 @@ fun SearchHomeScreen(
     onRequestPermission: () -> Unit,
     onClearHistory: () -> Unit,
     onOpenFilters: () -> Unit,
+    onPhoto: (Long) -> Unit,
 ) {
     if (state.photoAccess == PhotoAccess.DENIED) {
         PermissionScreen(onRequestPermission)
@@ -195,7 +182,13 @@ fun SearchHomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(3.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
-                    items(state.recentPhotos.take(8), key = { it.mediaId }) { photo -> PhotoThumbnail(photo.uri) }
+                    items(state.recentPhotos.take(8), key = { it.mediaId }) { photo ->
+                        PhotoThumbnail(
+                            photo.uri,
+                            Modifier.clickable { onPhoto(photo.mediaId) },
+                            photo.displayName,
+                        )
+                    }
                 }
             }
         }
@@ -368,78 +361,15 @@ private fun SelectionRow(label: String, selected: Boolean, onClick: () -> Unit) 
     }
 }
 
-@Composable
-fun PhotoDetailScreen(result: SearchResult?, onBack: () -> Unit, onShare: (MediaItem) -> Unit, onDelete: (MediaItem) -> Unit) {
-    if (result == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("This photo is no longer available") }
-        return
-    }
-    val media = result.media
-    Scaffold(topBar = {
-        TopAppBar(
-            title = {},
-            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
-            actions = { IconButton(onClick = {}) { Icon(Icons.Default.MoreVert, "More") } },
-        )
-    }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            AsyncImage(media.uri, media.displayName, Modifier.fillMaxWidth().weight(1f).background(Color.Black), contentScale = ContentScale.Fit)
-            Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(media.displayName ?: "Photo", fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(formatDate(media.dateTaken ?: media.dateAdded?.times(1000)), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Match score", fontWeight = FontWeight.SemiBold)
-                    Text("${MatchScoreFormatter.percentage(result.rawSimilarity)}%", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                }
-                Text("Relevance indicator derived from cosine similarity; not model confidence or probability.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (media.width != null && media.height != null) Text("${media.width} × ${media.height}  •  ${media.bucketName ?: "Photo library"}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedButton(onClick = { onShare(media) }, Modifier.weight(1f)) { Icon(Icons.Default.Share, null); Spacer(Modifier.width(6.dp)); Text("Share") }
-                    OutlinedButton(onClick = { onDelete(media) }, Modifier.weight(1f)) { Icon(Icons.Default.Delete, null); Spacer(Modifier.width(6.dp)); Text("Delete") }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun AlbumsScreen(albums: List<Album>) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
-        Text("Albums", fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 20.dp, bottom = 18.dp))
-        if (albums.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No accessible photo albums") }
-        else LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(albums, key = { it.id }) { album ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                    album.coverUri?.let { PhotoThumbnail(it, Modifier.size(62.dp)) }
-                    Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
-                        Text(album.name, fontWeight = FontWeight.SemiBold)
-                        Text("${album.count} photos", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
-                    }
-                    Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PhotoThumbnail(uri: String, modifier: Modifier = Modifier) {
-    AsyncImage(uri, null, modifier.aspectRatio(1f).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentScale = ContentScale.Crop)
-}
-
 private fun timeRangeLabel(range: TimeRange) = when (range) {
     TimeRange.ANY_TIME -> "Any time"; TimeRange.TODAY -> "Today"; TimeRange.YESTERDAY -> "Yesterday"
     TimeRange.THIS_WEEK -> "This week"; TimeRange.THIS_MONTH -> "This month"; TimeRange.CUSTOM -> "Custom range"
 }
 private fun sortLabel(sort: ResultSort) = when (sort) { ResultSort.MOST_RELEVANT -> "Most relevant"; ResultSort.NEWEST_FIRST -> "Newest first"; ResultSort.OLDEST_FIRST -> "Oldest first" }
-private fun formatDate(epochMillis: Long?): String = epochMillis?.let { DateTimeFormatter.ofPattern("MMM d, yyyy • h:mm a").format(Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault())) } ?: "Date unavailable"
-
 private val PreviewMedia = MediaItem(1, "", MediaType.IMAGE, "Beach.jpg", 1_715_760_000_000, 0, 0, 4032, 3024, "image/jpeg", "camera", "Camera")
 private val PreviewState = SearchUiState(photoAccess = PhotoAccess.FULL, query = "me at the beach", indexingStatus = IndexingStatus.Running(2431, 8912), history = listOf(SearchHistoryEntity(1, "sunset", System.currentTimeMillis(), null)), results = listOf(SearchResult(PreviewMedia, .42f)), resultQuery = "me at the beach", albums = listOf(Album("all", "All Photos", 8912, null)))
 
-@Preview(showBackground = true) @Composable private fun HomePreview() = PhotoSearchTheme { SearchHomeScreen(PreviewState, {}, {}, {}, {}, {}) }
+@Preview(showBackground = true) @Composable private fun HomePreview() = PhotoSearchTheme { SearchHomeScreen(PreviewState, {}, {}, {}, {}, {}, {}) }
 @Preview(showBackground = true) @Composable private fun SearchingPreview() = PhotoSearchTheme { SearchingScreen("me at the beach", {}, {}) }
 @Preview(showBackground = true) @Composable private fun ResultsPreview() = PhotoSearchTheme { ResultsScreen(PreviewState, {}, {}, {}, {}) }
 @Preview(showBackground = true) @Composable private fun FiltersPreview() = PhotoSearchTheme { FiltersScreen(SearchFilters(), {}, {}) }
-@Preview(showBackground = true) @Composable private fun DetailPreview() = PhotoSearchTheme { PhotoDetailScreen(PreviewState.results.first(), {}, {}, {}) }
-@Preview(showBackground = true) @Composable private fun AlbumsPreview() = PhotoSearchTheme { AlbumsScreen(PreviewState.albums) }

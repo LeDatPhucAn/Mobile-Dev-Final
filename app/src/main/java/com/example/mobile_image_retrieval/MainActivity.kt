@@ -3,6 +3,7 @@ package com.example.mobile_image_retrieval
 import android.app.Activity
 import android.app.RecoverableSecurityException
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
@@ -44,14 +45,16 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.mobile_image_retrieval.domain.model.AlbumCatalog
 import com.example.mobile_image_retrieval.domain.model.MediaItem
 import com.example.mobile_image_retrieval.domain.model.SearchFilters
 import com.example.mobile_image_retrieval.permissions.PhotoPermission
 import com.example.mobile_image_retrieval.ui.SearchEvent
 import com.example.mobile_image_retrieval.ui.SearchViewModel
+import com.example.mobile_image_retrieval.ui.screens.AlbumPhotosScreen
 import com.example.mobile_image_retrieval.ui.screens.AlbumsScreen
 import com.example.mobile_image_retrieval.ui.screens.FiltersScreen
-import com.example.mobile_image_retrieval.ui.screens.PhotoDetailScreen
+import com.example.mobile_image_retrieval.ui.screens.PhotoViewerScreen
 import com.example.mobile_image_retrieval.ui.screens.ResultsScreen
 import com.example.mobile_image_retrieval.ui.screens.SearchHomeScreen
 import com.example.mobile_image_retrieval.ui.screens.SearchingScreen
@@ -80,8 +83,14 @@ private object Route {
     const val RESULTS = "results"
     const val FILTERS = "filters"
     const val ALBUMS = "albums"
-    const val DETAIL = "detail/{mediaId}"
-    fun detail(mediaId: Long) = "detail/$mediaId"
+    const val ALBUM = "album/{albumId}"
+    const val RESULT_VIEWER = "viewer/results/{mediaId}"
+    const val LIBRARY_VIEWER = "viewer/library/{mediaId}"
+    const val ALBUM_VIEWER = "viewer/album/{albumId}/{mediaId}"
+    fun album(albumId: String) = "album/${Uri.encode(albumId)}"
+    fun resultViewer(mediaId: Long) = "viewer/results/$mediaId"
+    fun libraryViewer(mediaId: Long) = "viewer/library/$mediaId"
+    fun albumViewer(albumId: String, mediaId: Long) = "viewer/album/${Uri.encode(albumId)}/$mediaId"
 }
 
 @Composable
@@ -136,11 +145,19 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
         val item = pendingDelete
         if (result.resultCode == Activity.RESULT_OK && item != null) {
             scope.launch {
-                if (Build.VERSION.SDK_INT == 29) withContext(Dispatchers.IO) {
-                    runCatching { context.contentResolver.delete(item.uri.toUri(), null, null) }
+                val deletionSucceeded = if (Build.VERSION.SDK_INT == 29) {
+                    withContext(Dispatchers.IO) {
+                        runCatching { context.contentResolver.delete(item.uri.toUri(), null, null) }.isSuccess
+                    }
+                } else {
+                    true
                 }
-                viewModel.removeIndexedMedia(item.mediaId)
-                navController.popBackStack()
+                if (deletionSucceeded) {
+                    viewModel.removeIndexedMedia(item.mediaId)
+                    navController.popBackStack()
+                } else {
+                    snackbar.showSnackbar("This photo could not be deleted.")
+                }
             }
         }
         pendingDelete = null
@@ -148,8 +165,13 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
     fun requestDelete(item: MediaItem) {
         pendingDelete = item
         if (Build.VERSION.SDK_INT >= 30) {
-            val pendingIntent = MediaStore.createDeleteRequest(context.contentResolver, listOf(item.uri.toUri()))
-            deleteConfirmation.launch(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
+            runCatching {
+                val pendingIntent = MediaStore.createDeleteRequest(context.contentResolver, listOf(item.uri.toUri()))
+                deleteConfirmation.launch(IntentSenderRequest.Builder(pendingIntent.intentSender).build())
+            }.onFailure {
+                pendingDelete = null
+                scope.launch { snackbar.showSnackbar("This photo could not be deleted.") }
+            }
         } else {
             scope.launch {
                 try {
@@ -157,9 +179,34 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                     viewModel.removeIndexedMedia(item.mediaId)
                     navController.popBackStack()
                 } catch (recoverable: RecoverableSecurityException) {
-                    deleteConfirmation.launch(IntentSenderRequest.Builder(recoverable.userAction.actionIntent.intentSender).build())
+                    runCatching {
+                        deleteConfirmation.launch(IntentSenderRequest.Builder(recoverable.userAction.actionIntent.intentSender).build())
+                    }.onFailure {
+                        pendingDelete = null
+                        snackbar.showSnackbar("This photo could not be deleted.")
+                    }
+                } catch (_: SecurityException) {
+                    pendingDelete = null
+                    snackbar.showSnackbar("This photo could not be deleted.")
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    pendingDelete = null
+                    snackbar.showSnackbar("This photo could not be deleted.")
                 }
             }
+        }
+    }
+    fun share(item: MediaItem) {
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = item.mimeType ?: "image/*"
+            putExtra(Intent.EXTRA_STREAM, item.uri.toUri())
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        runCatching {
+            context.startActivity(Intent.createChooser(shareIntent, "Share photo"))
+        }.onFailure {
+            scope.launch { snackbar.showSnackbar("No app is available to share this photo.") }
         }
     }
 
@@ -187,6 +234,7 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                     state, viewModel::updateQuery, viewModel::submitSearch,
                     { permissionLauncher.launch(PhotoPermission.requestedPermissions()) },
                     viewModel::clearHistory, { navController.navigate(Route.FILTERS) },
+                    { navController.navigate(Route.libraryViewer(it)) },
                 )
             }
             composable(Route.SEARCHING) {
@@ -195,7 +243,7 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
             composable(Route.RESULTS) {
                 ResultsScreen(
                     state, { navController.popBackStack(Route.HOME, false) }, { navController.navigate(Route.FILTERS) },
-                    { viewModel.applyFilters(SearchFilters()) }, { navController.navigate(Route.detail(it)) },
+                    { viewModel.applyFilters(SearchFilters()) }, { navController.navigate(Route.resultViewer(it)) },
                 )
             }
             composable(Route.FILTERS) {
@@ -204,21 +252,61 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                     viewModel.applyFilters(filters)
                 }
             }
-            composable(Route.ALBUMS) { AlbumsScreen(state.albums) }
-            composable(Route.DETAIL, arguments = listOf(navArgument("mediaId") { type = NavType.LongType })) { entry ->
+            composable(Route.ALBUMS) {
+                AlbumsScreen(state.albums) { navController.navigate(Route.album(it)) }
+            }
+            composable(Route.ALBUM, arguments = listOf(navArgument("albumId") { type = NavType.StringType })) { entry ->
+                val albumId = Uri.decode(entry.arguments?.getString("albumId").orEmpty())
+                val album = state.albums.firstOrNull { it.id == albumId }
+                AlbumPhotosScreen(
+                    album = album,
+                    photos = AlbumCatalog.photosFor(
+                        albumId,
+                        state.libraryPhotos,
+                        state.librarySnapshotTimeMillis,
+                    ),
+                    onBack = { navController.popBackStack() },
+                    onPhoto = { navController.navigate(Route.albumViewer(albumId, it)) },
+                )
+            }
+            composable(Route.RESULT_VIEWER, arguments = listOf(navArgument("mediaId") { type = NavType.LongType })) { entry ->
                 val id = entry.arguments?.getLong("mediaId")
-                val result = state.results.firstOrNull { it.media.mediaId == id }
-                PhotoDetailScreen(
-                    result, { navController.popBackStack() },
-                    { item ->
-                        val share = Intent(Intent.ACTION_SEND).apply {
-                            type = item.mimeType ?: "image/*"
-                            putExtra(Intent.EXTRA_STREAM, item.uri.toUri())
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        context.startActivity(Intent.createChooser(share, "Share photo"))
-                    },
-                    ::requestDelete,
+                PhotoViewerScreen(
+                    photos = state.results.map { it.media },
+                    initialMediaId = id,
+                    onBack = { navController.popBackStack() },
+                    onShare = ::share,
+                    onDelete = ::requestDelete,
+                    scoreFor = { mediaId -> state.results.firstOrNull { it.media.mediaId == mediaId }?.rawSimilarity },
+                )
+            }
+            composable(Route.LIBRARY_VIEWER, arguments = listOf(navArgument("mediaId") { type = NavType.LongType })) { entry ->
+                PhotoViewerScreen(
+                    photos = state.libraryPhotos,
+                    initialMediaId = entry.arguments?.getLong("mediaId"),
+                    onBack = { navController.popBackStack() },
+                    onShare = ::share,
+                    onDelete = ::requestDelete,
+                )
+            }
+            composable(
+                Route.ALBUM_VIEWER,
+                arguments = listOf(
+                    navArgument("albumId") { type = NavType.StringType },
+                    navArgument("mediaId") { type = NavType.LongType },
+                ),
+            ) { entry ->
+                val albumId = Uri.decode(entry.arguments?.getString("albumId").orEmpty())
+                PhotoViewerScreen(
+                    photos = AlbumCatalog.photosFor(
+                        albumId,
+                        state.libraryPhotos,
+                        state.librarySnapshotTimeMillis,
+                    ),
+                    initialMediaId = entry.arguments?.getLong("mediaId"),
+                    onBack = { navController.popBackStack() },
+                    onShare = ::share,
+                    onDelete = ::requestDelete,
                 )
             }
         }

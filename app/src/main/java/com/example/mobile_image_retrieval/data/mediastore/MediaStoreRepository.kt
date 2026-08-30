@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import android.util.Size
 import androidx.core.net.toUri
 import com.example.mobile_image_retrieval.domain.model.Album
+import com.example.mobile_image_retrieval.domain.model.AlbumCatalog
 import com.example.mobile_image_retrieval.domain.model.MediaItem
 import com.example.mobile_image_retrieval.domain.model.MediaType
 import kotlinx.coroutines.Dispatchers
@@ -78,21 +79,10 @@ class MediaStoreRepository(private val resolver: ContentResolver) {
         return albums(images)
     }
 
-    fun albums(images: List<MediaItem>): List<Album> {
-        if (images.isEmpty()) return emptyList()
-        val result = mutableListOf(Album("all", "All Photos", images.size, images.first().uri, true))
-        val recentCutoffSeconds = (System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000) / 1000
-        val recent = images.filter { (it.dateAdded ?: 0) >= recentCutoffSeconds }
-        if (recent.isNotEmpty()) result += Album("recent", "Recently Added", recent.size, recent.maxByOrNull { it.dateAdded ?: 0 }?.uri, true)
-        images.groupBy { it.bucketId to it.bucketName }
-            .filterKeys { (id, name) -> id != null && !name.isNullOrBlank() }
-            .entries
-            .sortedByDescending { it.value.size }
-            .forEach { (bucket, media) ->
-                result += Album(bucket.first!!, bucket.second!!, media.size, media.firstOrNull()?.uri)
-            }
-        return result.distinctBy { it.id }
-    }
+    fun albums(
+        images: List<MediaItem>,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): List<Album> = AlbumCatalog.build(images, nowMillis)
 
     private fun android.database.Cursor.nullableString(index: Int) = if (isNull(index)) null else getString(index)
     private fun android.database.Cursor.nullableLong(index: Int) = if (isNull(index)) null else getLong(index)

@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -34,8 +35,10 @@ data class SearchUiState(
     val results: List<SearchResult> = emptyList(),
     val filters: SearchFilters = SearchFilters(),
     val history: List<SearchHistoryEntity> = emptyList(),
+    val libraryPhotos: List<MediaItem> = emptyList(),
     val recentPhotos: List<MediaItem> = emptyList(),
     val albums: List<Album> = emptyList(),
+    val librarySnapshotTimeMillis: Long = 0,
     val libraryTotal: Int = 0,
     val indexedCount: Int = 0,
     val error: UiError? = null,
@@ -49,10 +52,12 @@ sealed interface SearchEvent {
 
 class SearchViewModel(private val container: AppContainer) : ViewModel() {
     private val mutableState = MutableStateFlow(SearchUiState())
-    val state: StateFlow<SearchUiState> = mutableState
+    val state: StateFlow<SearchUiState> = mutableState.asStateFlow()
     private val mutableEvents = MutableSharedFlow<SearchEvent>(extraBufferCapacity = 2)
     val events = mutableEvents.asSharedFlow()
     private var searchJob: Job? = null
+    private var searchGeneration = 0L
+    private var libraryRefreshJob: Job? = null
     private val modelUnavailable = MobileClipAssets.unavailableReason(container.applicationContext)
     private var workerState: IndexingStateEntity? = null
 
@@ -79,27 +84,43 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
 
     fun updatePhotoAccess(access: PhotoAccess) {
         mutableState.update { it.copy(photoAccess = access, error = null) }
-        if (access != PhotoAccess.DENIED) refreshLibrary() else mutableState.update {
-            it.copy(error = UiError.Permission("Photo access is required to search your library."))
+        if (access != PhotoAccess.DENIED) {
+            refreshLibrary()
+        } else {
+            libraryRefreshJob?.cancel()
+            mutableState.update {
+                it.copy(error = UiError.Permission("Photo access is required to search your library."))
+            }
         }
     }
 
-    fun refreshLibrary() = viewModelScope.launch {
-        try {
-            val photos = container.mediaStoreRepository.queryImages()
-            val albums = container.mediaStoreRepository.albums(photos)
-            mutableState.update { current ->
-                current.copy(
-                    recentPhotos = photos.take(12), albums = albums, libraryTotal = photos.size,
-                    indexingStatus = indexingStatus(current.indexedCount, photos.size), error = null,
-                )
+    fun refreshLibrary(): Job {
+        libraryRefreshJob?.cancel()
+        return viewModelScope.launch {
+            try {
+                val photos = container.mediaStoreRepository.queryImages()
+                val snapshotTimeMillis = System.currentTimeMillis()
+                val albums = container.mediaStoreRepository.albums(photos, snapshotTimeMillis)
+                mutableState.update { current ->
+                    current.copy(
+                        libraryPhotos = photos,
+                        recentPhotos = photos.take(12),
+                        albums = albums,
+                        librarySnapshotTimeMillis = snapshotTimeMillis,
+                        libraryTotal = photos.size,
+                        indexingStatus = indexingStatus(current.indexedCount, photos.size),
+                        error = null,
+                    )
+                }
+                if (modelUnavailable == null) container.indexScheduler.enqueue()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: SecurityException) {
+                mutableState.update { it.copy(error = UiError.Permission("Photo access was revoked.")) }
+            } catch (error: Exception) {
+                mutableState.update { it.copy(error = UiError.Storage(error.message ?: "Could not read the photo library.")) }
             }
-            if (modelUnavailable == null) container.indexScheduler.enqueue()
-        } catch (error: SecurityException) {
-            mutableState.update { it.copy(error = UiError.Permission("Photo access was revoked.")) }
-        } catch (error: Exception) {
-            mutableState.update { it.copy(error = UiError.Storage(error.message ?: "Could not read the photo library.")) }
-        }
+        }.also { libraryRefreshJob = it }
     }
 
     fun submitSearch(query: String = state.value.query, filters: SearchFilters = state.value.filters) {
@@ -111,26 +132,30 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
             return
         }
         searchJob?.cancel()
+        val generation = ++searchGeneration
         mutableState.update { it.copy(query = clean, resultQuery = clean, filters = filters, isSearching = true, error = null) }
         mutableEvents.tryEmit(SearchEvent.Searching)
         searchJob = viewModelScope.launch {
             try {
                 val execution = container.searchRepository.search(clean, filters)
+                if (generation != searchGeneration) return@launch
                 Log.d(TAG, "query='$clean' text=${execution.textEmbeddingMillis}ms scan=${execution.vectorScanMillis}ms total=${execution.totalMillis}ms")
                 mutableState.update { it.copy(results = execution.results, isSearching = false) }
                 container.searchRepository.saveHistory(clean, execution.results.firstOrNull()?.media?.uri)
+                if (generation != searchGeneration) return@launch
                 mutableEvents.emit(SearchEvent.ResultsReady)
             } catch (_: kotlinx.coroutines.CancellationException) {
-                mutableState.update { it.copy(isSearching = false) }
+                if (generation == searchGeneration) mutableState.update { it.copy(isSearching = false) }
             } catch (error: ModelUnavailableException) {
-                failSearch(error.message ?: "MobileCLIP2-S0 is unavailable")
+                if (generation == searchGeneration) failSearch(error.message ?: "MobileCLIP2-S0 is unavailable")
             } catch (error: Exception) {
-                failSearch(error.message ?: "Search failed")
+                if (generation == searchGeneration) failSearch(error.message ?: "Search failed")
             }
         }
     }
 
     fun cancelSearch() {
+        searchGeneration++
         searchJob?.cancel()
         mutableState.update { it.copy(isSearching = false) }
     }
@@ -143,9 +168,19 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
     fun clearHistory() = viewModelScope.launch { container.searchRepository.clearHistory() }
     fun clearError() = mutableState.update { it.copy(error = null) }
     fun removeIndexedMedia(mediaId: Long) = viewModelScope.launch {
-        container.database.mediaEmbeddingDao().deleteIds(listOf(mediaId))
-        mutableState.update { it.copy(results = it.results.filterNot { result -> result.media.mediaId == mediaId }) }
-        refreshLibrary()
+        try {
+            container.database.mediaEmbeddingDao().deleteIds(listOf(mediaId))
+            mutableState.update { current ->
+                current.copy(results = current.results.filterNot { it.media.mediaId == mediaId })
+            }
+            refreshLibrary()
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            mutableState.update {
+                it.copy(error = UiError.Storage(error.message ?: "Could not update the photo index."))
+            }
+        }
     }
 
     private fun indexingStatus(indexed: Int, total: Int): IndexingStatus = when {
