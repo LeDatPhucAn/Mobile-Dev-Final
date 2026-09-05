@@ -1,227 +1,136 @@
-# Mobile Image Retrieval
+﻿# Mobile Image Retrieval (CS426 Final Project)
 
-Private, on-device semantic search over the user's Android photo library. The app is Kotlin/Jetpack Compose, targets Android 10+ (`minSdk 29`), never uploads media, and does not request `INTERNET` permission.
+An intelligent, native on-device Android application for privacy-preserving semantic photo search, personalized face retrieval, and Vietnamese receipt/screenshot OCR.
 
-See [course requirement mapping and demonstration](COURSE_REQUIREMENTS.md) for screen connections,
-persistence evidence, device integration and an assessment walkthrough.
+---
 
-## Vietnamese input and OCR
+## 1. Group Information
 
-Search and saved-person fields preserve keyboard composition for Vietnamese Telex/VNI input
-and hint Vietnamese/English locales to the keyboard. Select a Vietnamese keyboard on the device
-to type accents. Text is normalized to Unicode NFC on submission, not while composing.
+**Course:** CS426 - Mobile Device Application Development  
+**Project Title:** Mobile Image Retrieval: On-Device Semantic, Face & Text Search for Android  
 
-- **Normal query** searches visual content using a text prompt, reference image, or both.
-  Saved `@people` still filter by face identity. OCR matches do not affect normal-query ranking.
-- **OCR search** finds all entered words/numbers in bills and message screenshots without
-  running the CLIP text encoder. Try `hóa đơn`, `hoa don`, `70.000`, or `@thảo hóa đơn`.
-  Accents and punctuation do not need to match. This is word matching, not translation or fuzzy matching.
-  English descriptions remain best for visual concepts in Normal query; Vietnamese OCR
-  does not turn CLIP into a Vietnamese semantic model.
-- Open a photo and choose **Read text** to view, select, and copy the original text with accents.
+### Group Members (Ascending Student ID Order)
 
-The bundled ML Kit Latin OCR model supports Vietnamese and is available offline immediately;
-see [OCR model details](app/src/main/assets/models/OCR_MODELS.md). It is packaged by its Android
-dependency, so no additional manual model download is required.
+| Student ID | Full Name | Email / Contribution Focus | Work Allocation (%) |
+| :--- | :--- | :--- | :---: |
+| **24125041** | **Pham Nguyen Minh Quan** | Jetpack Compose UI, Screen Navigation, Report & Presentation | 25% |
+| **24125048** | **Tran Canh Anh Tuan** | Room Database, MediaStore Operations, Background Indexing Worker | 25% |
+| **24125049** | **Vong Chi Van** | MobileCLIP2-S0 Semantic Search, SCRFD Face Detection & MobileFaceNet | 25% |
+| **24125052** | **Le Dat Phuc An** | ML Kit Vietnamese OCR, FTS4 Full-Text Indexing, Product Requirements | 25% |
 
-Library indexing completes the pending CLIP image and face pass first, then scans pending OCR
-text last. The OCR tab explains when it is waiting for photos and faces. Previously cached text
-remains searchable, and the text reader can still recognize an individual photo on demand.
-The two tabs report separate progress. Unchanged text scans (including empty detections) are
-reused. The first full-library scan still decodes up to 2048 pixels per photo to retain small print;
-image decoding and text-recognition timings are logged separately under `PhotoTextIndex`.
-Queued work is distinguished from running work using WorkManager's actual state. **Refresh**
-retries pending photos. Opening the text reader can also recognize a photo on demand.
+---
 
-Room schema 4 adds `photo_text` (original text, folded text, modification/model version and empty
-scan markers) and `photo_text_fts` (FTS4 word index) in the private `photo-search.db` database.
-OCR text is not embedded. Searches reuse this index, while image and face vectors retain their
-existing tables. Removing/replacing a photo cascades its OCR data. Existing people, face vectors,
-image vectors and history survive migration; history remembers the search tab, including legacy
-mode names. Rows with `embeddingDimension = 0` hold metadata pending visual indexing and are
-excluded from normal search/counts. Filling an embedding preserves OCR for the same photo revision.
+## 2. Demo Video & Test Credentials
 
-## Saving a found photo
+- **Demo Video Link:** Please see [`video/demo-link.txt`](video/demo-link.txt) or access via:  
+  👉 **[Demo Video on Google Drive / YouTube (Link)](video/demo-link.txt)**
+- **Test Account Credentials:**  
+  *None required.* The application is 100% on-device and privacy-first. It does not require login, authentication tokens, network access (`INTERNET` permission is omitted from `AndroidManifest.xml`), or any cloud backend servers.
 
-Open a photo from search results, the library, or an album and tap **Save a copy**.
-The app streams the accessible original into `Pictures/Photo Search` without recompressing it,
-publishes it only after the write finishes, and removes an incomplete copy if saving fails.
-The original is retained. **View** in the success message opens the new copy in **Recently Added**,
-which sorts by addition time (newest first), even when the copied photo has an old capture date.
-Saving is disabled while a copy is in progress. The new photo joins ordinary incremental indexing.
+---
 
-The viewer supports pinch/pan, double-tap zoom and Reset zoom. In landscape, the image and
-scrollable actions are side by side. Photo grids adapt their column count to available width;
-the app follows the system's light/dark theme. Failed image loads provide a retry action.
+## 3. Project Overview & Key Features
 
-Search drafts and filter edits survive saved-state recreation. Search navigation is acknowledged
-through ViewModel state, so a result arriving during rotation is retained. After process death,
-transient result/search screens return to the restored draft; saved indexes, people and history
-remain in Room. Applying filters from Home edits the next query, while applying from Results
-reruns that search. A cancelled custom-date dialog leaves the previous filter intact.
+### Realistic Problem Solved
+Modern smartphone users store thousands of photos, receipts, documents, and screenshots, making filename and chronological browsing ineffective when searching for specific visual concepts or unaccented Vietnamese text.
 
-## Architecture
+### Core Capabilities
+1. **On-Device Semantic Visual Search:** Natural language search (e.g. `sunset on beach`, `coffee cup on table`) using an exported **MobileCLIP2-S0** model via ONNX Runtime without sending media to external servers.
+2. **Reverse Image Search & Similarity:** Search using a reference photo directly from the gallery or camera.
+3. **Face Enrollment & Multi-Person Identity Search:** Enroll people by face photo (`@alex`, `@mai_anh`). Filter photos by multiple people matching distinct faces simultaneously alongside visual scene descriptions.
+4. **Vietnamese OCR & Full-Text Search (FTS4):** Offline text recognition with Google ML Kit Latin + SQLite FTS4 word index. Search receipts and bills with or without Vietnamese diacritics (`hoa don`, `70.000`, `hóa đơn`).
+5. **Photo Viewer & Media Management:** Full-screen zoom/pan photo viewer, OCR text extractor/copying, safe lossless photo copying to `Pictures/Photo Search`, system sharing, and MediaStore deletion confirmation flow.
+6. **Robust Background Indexing:** Incremental indexing with Android **WorkManager** observing battery constraints, handling device rotation, process recreation, and incremental MediaStore changes.
 
-The app uses a small MVVM/repository structure:
+---
 
-- `ai/`: MobileCLIP2-S0 semantic search, SCRFD face detection, MobileFaceNet recognition, alignment, normalization, and exact Top-K search.
-- `data/mediastore/`: real `MediaStore` metadata and thumbnail access.
-- `data/db/`: Room entities, DAOs, and Float32 embedding codec.
-- `data/repository/`: search/history coordination and incremental-index planning.
-- `worker/`: resumable WorkManager indexing.
-- `ui/`: StateFlow ViewModel, Compose screens, navigation, and theme.
+## 4. Application Architecture
 
-```mermaid
-flowchart TD
-    MS[Android MediaStore] -->|content URI| TH[loadThumbnail 256 x 256]
-    TH --> PRE[Exporter-verified preprocessing]
-    PRE --> IE[Persistent MobileCLIP2-S0 image ONNX session]
-    IE --> N1[L2-normalized 512-D vector]
-    N1 --> DB[(Room: metadata + Float32 embedding)]
+The project follows standard Android **MVVM (Model-View-ViewModel)** and **Clean Architecture** patterns:
 
-    Q[Natural-language query] --> TOK[Exporter-verified CLIP tokenizer]
-    TOK --> TE[Persistent MobileCLIP2-S0 text ONNX session]
-    TE --> N2[L2-normalized 512-D vector]
-    N2 --> SCAN[Bounded-page exact dot-product scan]
-    DB --> SCAN
-    MS --> FD[Bounded photo decode and SCRFD detection]
-    FD --> FA[Five-point alignment and MobileFaceNet]
-    FA --> FDB[(Room: per-face vectors and index version)]
-    P[Saved @people face vectors] --> MATCH[Distinct face match for every person]
-    FDB --> MATCH
-    MATCH -->|filter before ranking| SCAN
-    SCAN --> TOPK[Bounded Top-K heap]
-    TOPK --> UI[Compose grid of real content URIs]
+```
+app/src/main/java/com/example/mobile_image_retrieval/
+├── ai/                 # OnnxRuntime sessions, MobileCLIP2-S0, SCRFD, MobileFaceNet, Vector Math
+├── data/
+│   ├── db/             # Room DB, Entities, DAOs, FTS4 tables, Float32 Vector Codecs, Migrations
+│   ├── mediastore/     # Android MediaStore access, query pagination, safe photo copying
+│   ├── ocr/            # Google ML Kit Text Recognition, Vietnamese text normalization
+│   └── repository/     # Search, Person, History, and MediaStore coordination repositories
+├── model/              # Domain models (SearchResult, Person, SearchFilter, IndexState)
+├── ui/                 # Jetpack Compose UI (8 connected screens, Navigation, ViewModels, Theme)
+└── worker/             # Resumable WorkManager background indexing pipelines
 ```
 
-## Indexing pipeline
+---
 
-`PhotoIndexWorker` queries accessible images newest-first. It compares each current `mediaId/dateModified` pair with Room:
+## 5. Build and Installation Instructions
 
-- new: embed and insert;
-- unchanged: skip semantic inference; backfill faces if the face index is missing or from an older model;
-- modified: embed and replace;
-- deleted: remove its Room row.
+### Prerequisites
+- **Android Studio:** Ladybug / Meerkat (or newer)
+- **JDK:** Version 17+
+- **Android SDK:** Compile SDK 36, Target SDK 36, **Minimum SDK 29 (Android 10+)**
+- **Hardware/Emulator:** Physical device or emulator running Android 10 (API 29) to Android 16 (API 36+).
 
-The worker persists each successful item immediately, so process death does not discard earlier work. One worker handles the controlled sequence; there is no task or coroutine per photo. A bad thumbnail is logged and skipped without terminating the library pass. WorkManager uses a battery-not-low constraint but does not require charging or networking.
+### Building from Command Line
 
-OCR and face cache writes check the parent photo revision transactionally. Older visual work
-cannot replace a newer indexed revision. A final MediaStore snapshot schedules another incremental
-pass if the library changed during indexing. CLIP sessions use two inference threads to limit CPU
-contention with the UI and foreground searches.
+#### On Windows:
+```powershell
+# Build Debug APK
+.\gradlew.bat :app:assembleDebug
 
-Semantic indexing uses `ContentResolver.loadThumbnail(uri, Size(256, 256), ...)`. Face indexing separately decodes an EXIF-oriented version of the original with a longest side of at most 1280 pixels, preserving the full frame, and runs a 640×640 detector followed by sequential 112×112 face recognition. Each bitmap is recycled before continuing to the next photo. Photos with no faces receive a completion marker so they are not reprocessed on every pass. Face rows and completion markers are replaced atomically and cascade away when the parent photo is removed or replaced.
+# Run Unit Tests
+.\gradlew.bat :app:testDebugUnitTest
 
-## MobileCLIP2-S0 integration
+# Run Lint checks
+.\gradlew.bat :app:lintDebug
 
-Place assets under `app/src/main/assets/models/`:
-
-1. `mobileclip2_s0_image.onnx`
-2. `mobileclip2_s0_text.onnx`
-3. `mobileclip2_s0_config.json`
-4. tokenizer vocabulary and merges files named by the config
-
-The image and text graphs must come from the same MobileCLIP2-S0 checkpoint and both output exactly 512 Float32 values. Each session is initialized lazily once and retained for the application process. Image and text inference are individually serialized with a `Mutex` until device profiling justifies safe parallelism.
-
-The config is generated alongside the graphs and is the runtime contract. Its top-level structure is:
-
-```json
-{
-  "format_version": 1,
-  "model": { "name": "MobileCLIP2-S0", "embedding_dimension": 512 },
-  "image_encoder": {
-    "input_name": "pixel_values",
-    "output_name": "image_embedding",
-    "layout": "NCHW",
-    "image_size": 256,
-    "preprocessing": {
-      "resize_mode": "shortest",
-      "interpolation": "bicubic",
-      "center_crop": true,
-      "divide_uint8_by_255": true
-    }
-  },
-  "text_encoder": {
-    "input_name": "input_ids",
-    "output_name": "text_embedding",
-    "input_dtype": "int64",
-    "context_length": 77
-  },
-  "tokenizer": { "type": "open_clip_simple_tokenizer" },
-  "tokenizer_test_vectors": []
-}
+# Build Release APK
+.\gradlew.bat :app:assembleRelease
 ```
 
-This excerpt omits additional required fields; `mobileclip2_s0_config.json` is the complete schema. `MobileClipModelConfig` validates graph shapes/types, preprocessing, tokenizer metadata, and generated token-ID vectors. `MobileClipPreprocessor` performs the declared shortest-edge bicubic resize and center crop, and `MobileClipTokenizer` implements the declared OpenCLIP byte-BPE pipeline. Graph inputs and embedding outputs are checked against ONNX Runtime before inference. If an export renamed the configured output, the runtime accepts only a unique Float32 output with shape `[1 or dynamic batch, 512]`; ambiguous or incompatible outputs report the available names and shapes. Missing or inconsistent assets produce a visible error; no random vector, MobileNet, or alternate CLIP fallback exists.
-
-The exported graph contract is strict: image input is Float32 NCHW and text input is Int64 token IDs with no attention-mask input. Both outputs are Float32 512-D embeddings.
-
-## Vector storage and search
-
-### Image search and saved people
-
-On Search, choose **Search by image**, select a reference photo, optionally add a description, and tap **Search**. You can also open a library or result photo and tap **Find similar photos**. The image is encoded with the same MobileCLIP2-S0 model as the library. Filters keep the reference image when rerunning the search. Remove the reference with the close button to return to text-only search. Image queries are session-only and are not added to text search history.
-
-Open **People → Add person**, select one clear photo, and save a name such as `Alex` or `Mai Anh`. The corresponding handles are `@alex` and `@mai_anh`. Names accept 1–40 Unicode letters, numbers, or underscores; spaces become underscores and handles are case-insensitive. Duplicate handles are rejected. Tap a saved handle to search, or type a prompt such as `@alex at the beach`; matching handle suggestions appear while typing. Multiple mentions are supported, and unknown names produce an actionable error. Removing a person deletes their local reference and makes that handle unavailable to future searches.
-
-Saved people persist in Room with a small JPEG thumbnail, a MobileFaceNet face embedding, and its model version; the original picker URI is not needed after saving. Enrollment requires exactly one clear face and rejects no-face, group, and very small/unclear-face photos. **Change face photo** replaces the reference while preserving the person's name and handle. Everything stays on-device. Image selection uses the [Android photo picker](https://developer.android.com/training/data-storage/shared/photo-picker).
-
-For `@alex @mai at the beach`, each identity must match a distinct face above the cosine threshold before the photo is ranked using the CLIP embedding for `at the beach`. People-only queries rank by face similarity. A selected search image can also supply CLIP context, combined equally with text when both are provided. Face embeddings are never averaged across people or mixed into CLIP space. No face inference runs when resolving a saved mention: queries reuse stored vectors.
-
-Database migrations 1 → 2 → 3 preserve the semantic index, history and saved names. Existing whole-photo person references are marked as needing **Update face** in People; they are never silently compared against face embeddings. The next worker pass backfills face data for previously indexed photos. Search and People show progress and warn when results may still be incomplete.
-
-The bundled `det_500m.onnx` and `w600k_mbf.onnx` total approximately 16.1 MB. See [face model provenance, licenses and runtime contract](app/src/main/assets/models/FACE_MODELS.md). The supplied InsightFace weights are for **non-commercial research only**. Matching starts at cosine 0.45; this is an uncalibrated operating point, not a probability. Real-device evaluation is needed for false matches, misses, pose/lighting changes, and small faces in group photos.
-
-Both encoders are L2-normalized. Cosine similarity therefore becomes an allocation-free inner-loop dot product. Search reads Room candidates in pages of 512 and maintains a bounded min-heap, avoiding a full result sort and avoiding loading every embedding object at once. The implementation is isolated behind `SearchCandidateSource`, so another local index could replace it later if profiling warrants it; no HNSW or vector server is included now.
-
-Equal relevance uses photo date and ID for deterministic ordering. Normal query returns the best
-100 visual matches, with date sorting applied within those matches. OCR date sorting selects the
-correct oldest/newest 100 from all text matches. OCR reads omit image-vector bytes, and an empty
-text-match set skips the candidate scan entirely. **Search again** refreshes results as indexing advances.
-
-`MediaEmbeddingEntity` stores MediaStore ID, `content://` URI, media type, display metadata, dates, dimensions, bucket data, a Float32 byte array, dimension, and indexing time. It never stores image bytes or filesystem paths. A 512-D vector costs 2,048 bytes, or roughly 20 MB for 10,000 photos before database overhead. `EmbeddingCodec` is the single point for a future explicit FP16 migration.
-
-Search history is another Room table. Insertions trim it to the latest 100 rows; production contains no seeded history. The match percentage shown in detail is a UI-normalized relevance indicator derived from raw cosine similarity. Raw similarity remains stored in `SearchResult`; the percentage is not confidence or probability.
-
-## Permissions and privacy
-
-- Android 13+: requests `READ_MEDIA_IMAGES`.
-- Android 14+: also recognizes `READ_MEDIA_VISUAL_USER_SELECTED` and displays a partial-access state.
-- Android 10–12L: requests `READ_EXTERNAL_STORAGE`.
-- Video permission is not requested because v1 indexes images only.
-
-Denied, partial, and revoked access are handled in UI. Delete uses the MediaStore system confirmation flow where required. The app performs inference and stores its index locally, does not request `INTERNET` permission, and does not upload photos or searches. Android backup is disabled for the local index and search history.
-
-Albums load directly from MediaStore independently of semantic indexing. The library refreshes on resume, when opening Albums, and when MediaStore reports changes while the app is visible. Albums distinguish loading, read failures, and an empty library, with refresh and photo-access controls. Partial access can be expanded from either the search or album screen.
-
-## Build and tests
-
-Connected instrumentation tests keep the installed app after completion via
-`android.injected.androidTest.leaveApksInstalledAfterRun=true`. Without this setting, Gradle's
-test cleanup can uninstall the app and erase `photo-search.db`, causing a full scan on the next
-installation. Prefer a dedicated test emulator; update the development installation in place
-(Android Studio Run or `adb install -r`) to retain its index. Uninstalling or clearing app data
-still removes the local index.
-
-Open the existing root in a current Android Studio with Android SDK 36 installed, then run:
-
-```text
-gradlew.bat :app:assembleDebug
-gradlew.bat :app:testDebugUnitTest
-gradlew.bat :app:lintDebug
-gradlew.bat :app:connectedDebugAndroidTest
+#### On Linux / macOS:
+```bash
+chmod +x gradlew
+./gradlew :app:assembleDebug
+./gradlew :app:testDebugUnitTest
+./gradlew :app:lintDebug
+./gradlew :app:assembleRelease
 ```
 
-The last command needs a device/emulator. Tests cover semantic ranking, mention parsing, distinct face assignment, alignment, duplicate-detection suppression, migration and deletion cascades, legacy re-enrollment, enrollment rejection, and combined person/context search. Instrumentation also runs the bundled detector and recognizer against a public-domain portrait at multiple sizes and in a two-face composition, and verifies no-face detection on a blank image.
+### Installation via ADB
 
-For a real phone: install the debug APK, grant all or selected photo access, confirm real thumbnails/albums appear, and watch indexing progress. Interrupt/relaunch to verify already persisted vectors are skipped. With verified model assets installed, test in airplane mode, run several natural-language searches, compare relevance/filter ordering, open/share a result, and verify MediaStore deletion requires system consent.
+```bash
+# Verify connected device
+adb devices
 
-## Current limitations
+# Install Debug APK
+adb install -r app/build/outputs/apk/debug/app-debug.apk
 
-- The large MobileCLIP2-S0 ONNX graphs are intentionally gitignored. A fresh clone requires the two exporter-validated graph files before semantic indexing/search is available; the generated config and tokenizer assets are included.
-- V1 indexes accessible images only. The schema supports `VIDEO`, but representative video thumbnails and `READ_MEDIA_VIDEO` permission are not enabled yet.
-- Album rows are real MediaStore buckets and system collections with photo browsing; album editing and “add to album” are not implemented.
-- Search is exact and intentionally capped to the top 100 rendered results. This is appropriate for the target 5,000–30,000 items but should be profiled on target hardware.
-- Face matching supports explicitly enrolled people. Small, obscured, poorly lit faces can be missed; lookalikes can be confused. Automatic naming/clustering, favorites, scene splitting, frame sampling, and temporal video search are not implemented.
+# Launch Application
+adb shell am start -n com.example.mobile_image_retrieval/.MainActivity
+```
 
-Future work can add a verified accelerated export (LiteRT, ExecuTorch, QNN), configurable thermal/battery policy, FP16 storage migration, representative video indexing, and—only if device profiling demonstrates a need—a replaceable approximate local vector index.
+---
+
+## 6. Permissions and Privacy
+
+- `READ_MEDIA_IMAGES` (Android 13+) / `READ_MEDIA_VISUAL_USER_SELECTED` (Android 14+ partial access)
+- `READ_EXTERNAL_STORAGE` (Android 10–12L)
+- **Zero Network Permissions:** `INTERNET` permission is completely excluded. All AI inference, face extraction, OCR, and search indexing occur 100% locally on the device.
+
+---
+
+## 7. Submission Package Structure
+
+```
+24125041_24125048_24125049_24125052/
+├── README.md              # Project metadata, members, build steps & instructions
+├── src/                   # Complete source code (excluding build, .gradle, .idea)
+│   └── Mobile-Dev-Final/
+├── apk/
+│   └── app-release.apk    # Installable Android APK (API 24+)
+├── report/
+│   └── report.pdf         # Final project report PDF (10–30 pages)
+└── video/
+    └── demo-link.txt      # Link to Google Drive / YouTube demo video
+```
