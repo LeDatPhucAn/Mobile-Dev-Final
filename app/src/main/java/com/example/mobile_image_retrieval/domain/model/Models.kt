@@ -50,7 +50,7 @@ data class Album(
 sealed interface IndexingStatus {
     data object Idle : IndexingStatus
     data class Running(val indexed: Int, val total: Int) : IndexingStatus
-    data class Waiting(val indexed: Int, val total: Int) : IndexingStatus
+    data class Waiting(val indexed: Int, val total: Int, val reason: String? = null) : IndexingStatus
     data class Interrupted(val indexed: Int, val total: Int) : IndexingStatus
     data class Unavailable(val reason: String) : IndexingStatus
 }
