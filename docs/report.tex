@@ -1,0 +1,766 @@
+% !TeX program = xelatex
+% From the repository root: tectonic --outdir docs/build docs/report.tex
+% Or, from docs/, run twice: xelatex -interaction=nonstopmode -halt-on-error report.tex
+% Use XeLaTeX, LuaLaTeX, or Tectonic for the Vietnamese Unicode text.
+% Default bundled Latin Modern fonts; no system fonts or fontspec required.
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=20mm]{geometry}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage[hidelinks]{hyperref}
+\hypersetup{pdftitle={Mobile Image Retrieval: CS426 Final Project Report},
+  pdfauthor={Vong Chi Van; Le Dat Phuc An; Pham Nguyen Minh Quan; Tran Canh Anh Tuan},
+  pdfsubject={Final Project for CS426 Mobile Device Application Development},
+  bookmarksnumbered=true}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt plus 1pt minus 1pt}
+\setlength{\emergencystretch}{2em}
+\setcounter{tocdepth}{1}
+\setcounter{secnumdepth}{2}
+\clubpenalty=10000
+\widowpenalty=10000
+\pagestyle{plain}
+\newcommand{\code}[1]{{\small\texttt{#1}}}
+\newcommand{\source}[1]{\hyperref[src:#1]{[#1]}}
+\newcommand{\sources}[1]{{\small Sources: #1.}\par}
+\newcommand{\reportsection}[1]{\clearpage\section{#1}}
+\newcommand{\pending}{\textit{To be confirmed}}
+\newcommand{\reporttablecaption}[2]{\par\refstepcounter{table}\label{tab:#1}\noindent{\small\textbf{Table~\thetable.} #2}\par\nopagebreak[4]\vspace{3pt}\nopagebreak[4]}
+\newcommand{\reportfigurecaption}[2]{\par\refstepcounter{figure}\label{fig:#1}{\small\textbf{Figure~\thefigure.} #2}\par}
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newenvironment{reporttable}[1]{\par\small\renewcommand{\arraystretch}{1.16}\setlength{\tabcolsep}{5pt}\begin{tabular}{#1}\hline}{\hline\end{tabular}\par\normalsize}
+
+\newcommand{\CourseCode}{CS426}
+\newcommand{\CourseTitle}{Mobile Device Application Development}
+\newcommand{\TeamMembers}{%
+  \begin{tabular}{ll}
+  \textbf{Team Member} & \textbf{Student ID}\\[5pt]
+  Vong Chi Van & 24125049\\[3pt]
+  Le Dat Phuc An & 24125052\\[3pt]
+  Pham Nguyen Minh Quan & 24125041\\[3pt]
+  Tran Canh Anh Tuan & 24125048
+  \end{tabular}%
+}
+\newcommand{\ReportDate}{5 September 2026}
+
+\begin{document}
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+\thispagestyle{empty}
+\pdfbookmark[0]{Cover}{cover}
+\centering
+\vspace*{12mm}
+{\large\bfseries\CourseCode\par}
+\vspace{3mm}
+{\large\CourseTitle\par}
+\vspace{5mm}
+{\large Final Project Report\par}
+\vspace{22mm}
+\rule{0.82\textwidth}{0.5pt}\par
+\vspace{8mm}
+{\fontsize{28}{34}\selectfont\bfseries Mobile Image Retrieval\par}
+\vspace{6mm}
+{\Large Design, Implementation, and Evaluation\par}
+\vspace{3mm}
+{\large An On-Device Photo Retrieval Application\par}
+\vspace{8mm}
+\rule{0.82\textwidth}{0.5pt}\par
+\vfill
+{\normalsize\TeamMembers\par}
+\vspace{5mm}
+{\small Individual responsibilities are recorded in Section~\ref{sec:division}.\par}
+\vspace{15mm}
+\begin{tabular}{rl}
+\textbf{Application version:} & 1.0\\[4pt]
+\textbf{Target platform:} & Android 10 (API 29) and above\\[4pt]
+\textbf{Source revision:} & \code{5ceff0f}\\[4pt]
+\textbf{Report date:} & \ReportDate
+\end{tabular}
+\vspace*{12mm}
+\end{titlepage}
+\pagenumbering{roman}
+\hypersetup{pageanchor=true}
+\pdfbookmark[0]{Abstract}{abstract}
+\section*{Abstract}
+
+The growth of personal photo libraries creates a retrieval problem when users remember an image's content but cannot recall its filename, capture date, or album. This project addresses that problem through Mobile Image Retrieval, a native Android application that supports semantic text queries, reference-image queries, explicitly enrolled people, and optical character recognition (OCR). The intended users include individuals managing mixed personal collections and Vietnamese-speaking users retrieving receipts, messages, and screenshots.
+
+The application combines MobileCLIP2-S0 for visual retrieval, SCRFD and MobileFaceNet for face detection and recognition, and bundled ML Kit text recognition for literal text search. Its architecture separates Jetpack Compose interfaces, ViewModel state management, repository coordination, and persistent storage. Room maintains a local index, while MediaStore supplies access to device photos and WorkManager schedules incremental indexing. Inference is performed on the device; the application manifest excludes network permissions. Vietnamese OCR retrieval supports accent-insensitive matching while preserving the original text for reading and copying.
+
+The implemented system provides eight connected feature screens and supports retrieval, filtering, photo viewing, sharing, saving copies, and deletion through Android media services. The project audit dated 5 September 2026 records a successful debug build, 63 passing unit tests, 40 passing instrumentation tests, and no lint errors. These results establish documented functional coverage; recognition accuracy and performance across representative physical devices require further evaluation. The principal limitations concern model size, initialization cost, recognition errors, and the current restriction to image media. \source{R1}, \source{R2}
+
+\textbf{Keywords:} Android; on-device inference; image retrieval; semantic search; face recognition; Vietnamese OCR; local persistence.
+
+\subsection*{Scope and Evidence}
+This report documents the final project for \CourseCode{}: \CourseTitle{}. It presents the project objectives, target users, architecture, implementation technologies, installation procedures, work allocation, and self-assessment. Execution results are attributed to the supplied project audit. Source inspection and model-asset checks provide supplementary consistency evidence. Individual contribution records and presentation completion are identified separately where confirmation remains outstanding.
+
+\subsection*{Report Organization}
+Sections 1--5 establish the application context and requirements. Sections 6--12 describe the architecture and implementation. Sections 13--14 document setup and installation. Sections 15--19 present validation, self-assessment, limitations, work allocation, and the demonstration plan. Section~\ref{sec:references} identifies the supporting repository sources.
+
+\clearpage
+\pdfbookmark[0]{Contents}{contents}
+{\small\tableofcontents}
+\clearpage
+\pagenumbering{arabic}
+
+\reportsection{Introduction and Project Objectives}
+
+\subsection{Problem Statement}
+
+Personal photo libraries commonly include camera photographs, screenshots, receipts, message captures, and downloaded images. Filename-based and chronological browsing provide limited support when a user recalls visual content or a textual phrase but cannot identify the corresponding file or capture date. Manual categorization also introduces a continuing organizational burden.
+
+The topic of this project is \textbf{private, on-device image retrieval}: making an Android photo library searchable through visual concepts, examples, known people, and recognized text. The application operates on accessible device photos and produces results that the user can open and use immediately. It requires no account, application server, or cloud photo upload. \source{R2}, \source{R3}
+
+\subsection{Objectives and Acceptance Criteria}
+
+\reporttablecaption{objectives}{Project Objectives and Acceptance Criteria}
+\begin{reporttable}{P{\dimexpr0.2900\linewidth-2\tabcolsep\relax}P{\dimexpr0.7100\linewidth-2\tabcolsep\relax}}
+\textbf{Objective} & \textbf{Observable success condition}\\\hline
+Visual content retrieval & A text prompt, reference image, or combined query returns ranked device photos.\\
+Enrolled-person retrieval & A saved handle filters results by face similarity; multiple handles require distinct matching faces.\\
+Text-based image retrieval & OCR search retrieves photos containing specified words or numbers, including Vietnamese text entered without accents.\\
+Retrieval-to-action workflow & Retrieved photos open in a viewer supporting zoom, sharing, copying, deletion, and text reading.\\
+Persistent application state & Indexed data, saved people, and text-search history are retained across application restarts.\\
+Course requirement compliance & The native-installable Android application provides connected screens, local persistence, and device integration.\\
+\end{reporttable}
+
+\subsection{Scope and Contribution}
+
+The implemented product focuses on accessible \textbf{images}. The database model includes a video type, but the current application does not request video permission or provide video indexing. Albums support browsing device collections; creating or editing albums is outside the implemented scope. \source{R2}
+
+The project integrates three retrieval mechanisms with different purposes. CLIP represents visual meaning; face embeddings represent enrolled identities; OCR indexes literal text. Keeping these representations separate avoids treating a person's identity as a scene description or treating recognized words as visual relevance.
+
+The principal engineering contribution is the integration of pretrained retrieval models with Android permission management, lifecycle handling, background execution, persistent storage, and media operations. Evaluation addresses implemented functionality and documented reliability scenarios. Recognition quality and performance across representative devices remain subjects for further empirical assessment.
+
+\sources{\source{R1}, \source{R2}, \source{R3}, \source{R7}, \source{R8}, \source{R9}}
+
+\reportsection{Target Users and Use Cases}
+
+\subsection{Intended Audience}
+
+The primary target group comprises Android users managing heterogeneous personal image collections who require content-based retrieval without comprehensive manual tagging. Vietnamese-speaking students and personal-device users form a relevant secondary group because receipts, messages, and screenshots frequently contain Vietnamese text. English visual descriptions remain the most suitable input for Normal query. \source{R2}
+
+The following profiles are capability-based design scenarios. Empirical validation through interviews or usability studies remains outside the available evaluation evidence.
+
+\reporttablecaption{users}{Target User Profiles and Supported Workflows}
+\begin{reporttable}{P{\dimexpr0.2400\linewidth-2\tabcolsep\relax}P{\dimexpr0.3700\linewidth-2\tabcolsep\relax}P{\dimexpr0.3900\linewidth-2\tabcolsep\relax}}
+\textbf{User profile} & \textbf{Need} & \textbf{Supported workflow}\\\hline
+Student & Recover a saved receipt or message screenshot without remembering its date. & OCR search \(\rightarrow\) enter “hóa đơn” or “hoa don” \(\rightarrow\) open result \(\rightarrow\) Read text.\\
+Personal photo owner & Find a scene, object, or visually similar image among many photos. & Normal query \(\rightarrow\) enter a description or choose a reference image \(\rightarrow\) browse ranked results.\\
+Family or travel user & Find an enrolled person within a meaningful setting. & People \(\rightarrow\) save one clear face \(\rightarrow\) search “@alex at the beach.”\\
+User with limited connectivity & Browse and search accessible photos without uploading the library. & Install an APK containing the models \(\rightarrow\) grant access \(\rightarrow\) index \(\rightarrow\) search offline.\\
+\end{reporttable}
+
+\subsection{Representative Use Cases}
+
+\begin{enumerate}
+\item \textbf{Recover a document image.} The user selects OCR search and enters words actually visible in a screenshot. The application folds accents for matching, returns matching photos, and preserves the original accented text in the reader. The user copies the required passage.
+\item \textbf{Find a remembered scene.} The user enters “sunset at the beach” in Normal query. After indexing, the application ranks photos by visual similarity. Date filters narrow the candidates, and the viewer exposes share and save-copy actions.
+\item \textbf{Find known people together.} The user enrolls two people separately and searches their handles together. Each person must match a distinct detected face. Adding a visual description further ranks the photos that pass the identity filter.
+\item \textbf{Reuse a found image.} The user opens a result, selects Save a copy, and follows View to the new image in Recently Added. The original photo remains in place.
+\end{enumerate}
+
+\subsection{Operating Assumptions}
+
+The operating assumptions are an Android 10+ device, sufficient storage for model assets and the local index, and user-authorized access to the relevant photos. The README identifies approximately 5,000--30,000 images as the intended library range; sustained performance at that scale requires device-level profiling. Incremental indexing permits initial use with a smaller collection.
+
+Face search is an aid to personal photo retrieval. Matching can miss a person or confuse similar faces, and the displayed visual match percentage is a relevance indicator rather than a probability. No user study or calibrated recognition benchmark is supplied in the repository.
+
+\sources{\source{R2}, \source{R7}, \source{R8}, \source{R9}}
+
+\reportsection{Requirements Analysis and Scope}
+
+\subsection{Required Application Capabilities}
+
+The course specification requires at least three to four functionally connected screens, persistent local storage, integration with a device capability or external data source, an approved Android development stack, and a native-installable application. The implementation mapping below identifies the corresponding components and verification procedures. \source{R1}
+
+\reporttablecaption{requirements}{Traceability of Course Requirements}
+\begin{reporttable}{P{\dimexpr0.2500\linewidth-2\tabcolsep\relax}P{\dimexpr0.4800\linewidth-2\tabcolsep\relax}P{\dimexpr0.2700\linewidth-2\tabcolsep\relax}}
+\textbf{Requirement} & \textbf{Implemented evidence} & \textbf{Verification route}\\\hline
+Connected screens & Eight feature screens connect search, results, filters, people, albums, album contents, viewing, and text reading. & Follow Section~\ref{sec:screens}; inspect MainActivity.\\
+Persistent local data & Room schema 4 stores media metadata and embeddings, faces, OCR, people, history, and indexing state. & Reopen the same installation; inspect database entities and migrations.\\
+Device or external integration & MediaStore reads actual device photos. The system photo picker, share sheet, save-copy operation, and deletion flow integrate with Android. & Browse albums and perform viewer actions on device photos.\\
+Permitted stack & Kotlin, Android SDK, Jetpack Compose, ViewModel, Room, and WorkManager. & Inspect Gradle configuration and source packages.\\
+Native Android product & Gradle assembles an installable APK; minSdk is 29. Local inference models are packaged as assets or bundled dependencies. & Build and install using Sections 13–14.\\
+\end{reporttable}
+
+Device integration satisfies the supplied alternative to an external web API. A REST backend is not necessary for the application's purpose, and no server deployment is part of the setup.
+
+\subsection{Non-Functional Requirements}
+
+\begin{itemize}
+\item \textbf{Responsiveness:} searches use coroutines; expensive inference is outside UI rendering; WorkManager controls incremental indexing.
+\item \textbf{Persistence and integrity:} completed stages are committed per photo, migrations retain earlier data, and revision checks reject stale writes against a newer photo version.
+\item \textbf{Usability:} the UI distinguishes missing access, empty libraries, loading, queued work, errors, and partial results. Grids adapt to width, and viewer actions remain reachable in landscape.
+\item \textbf{Privacy:} inference and indexing remain local; the manifest removes network permissions and disables backup. Sharing is a separate, user-initiated Android action.
+\end{itemize}
+
+\subsection{Assessment Scope}
+
+The assessment scope comprises application implementation, technical quality, interface design, originality, documentation, presentation, and collaboration. This report addresses the required documentation categories and provides a demonstration protocol in Section 19. Recording completion and individual contributions require separate supporting records.
+
+\sources{\source{R1}, \source{R3}, \source{R4}, \source{R5}, \source{R6}, \source{R10}, \source{R11}}
+
+\reportsection{Application Screens and Navigation}
+\label{sec:screens}
+
+The application uses a single Activity with Navigation Compose. Search, People, and Albums form the top-level destinations; Results, Filters, Photo Viewer, and Text Reader complete the principal retrieval and browsing workflows. Loading and permission views are treated as interface states rather than independent feature screens. \source{R4}
+
+
+\begin{center}
+\begin{tabular}{c}
+People $\rightarrow$ Search $\rightarrow$ Results $\leftrightarrow$ Filters \\[5pt]
+Results $\rightarrow$ Photo viewer $\rightarrow$ Text reader \\[5pt]
+Albums $\rightarrow$ Album contents $\rightarrow$ Photo viewer
+\end{tabular}
+\end{center}
+
+
+\reportfigurecaption{navigation}{Feature-screen navigation. Arrows indicate the principal user workflows; back navigation is omitted for clarity.}
+
+\reporttablecaption{screens}{Application Screens and Responsibilities}
+\begin{reporttable}{P{\dimexpr0.2600\linewidth-2\tabcolsep\relax}P{\dimexpr0.7400\linewidth-2\tabcolsep\relax}}
+\textbf{Screen} & \textbf{Purpose and connection}\\\hline
+Search & Select Normal query or OCR search, enter text, choose a reference image, and access history.\\
+Results & Display a grid of real matches; open a photo or adjust the active search.\\
+Filters & Apply predefined/custom dates and sorting; update the next query or rerun Results.\\
+People & Add, update, and remove face references; use saved handles in a query.\\
+Albums & Browse actual MediaStore buckets and system collections independently of AI indexing.\\
+Album contents & Open photos belonging to the selected collection.\\
+Photo viewer & Inspect and zoom; find similar photos, share, save a copy, delete, or read text.\\
+Text reader & View, select, and copy recognized text with its original accents.\\
+\end{reporttable}
+
+The viewer has routes for results, the library, and album contexts. Save a copy produces a snackbar with a View action that opens the new media item through Recently Added. “Find similar photos” makes the current photo the next query's image reference.
+
+\sources{\source{R1}, \source{R2}, \source{R4}}
+
+\reportsection{User Interface and Usability}
+
+\subsection{Query Modes and User Feedback}
+
+The query interface distinguishes two retrieval modes. \textbf{Normal query} accepts visual text, an image, or both. \textbf{OCR search} accepts words and numbers from image text; it rejects image-query input and does not invoke the CLIP text encoder. Both modes can apply saved-person filters when the required face data is available. \source{R7}, \source{R9}
+
+Separate progress indicators represent OCR and visual/face indexing. Completed items become searchable before the full library has been processed. WorkManager state distinguishes queued tasks from active execution, including delays caused by battery constraints. Refresh and Search again enable the user to retry pending work and retrieve newly indexed items.
+
+\reporttablecaption{states}{Interface States and Recovery Mechanisms}
+\begin{reporttable}{P{\dimexpr0.2700\linewidth-2\tabcolsep\relax}P{\dimexpr0.4300\linewidth-2\tabcolsep\relax}P{\dimexpr0.3000\linewidth-2\tabcolsep\relax}}
+\textbf{Situation} & \textbf{Interface response} & \textbf{User benefit}\\\hline
+No photo access & Permission guidance and recovery through app settings. & Explains why photos are unavailable.\\
+Selected-photo access & Partial-access state with controls to add access. & Clarifies the searchable library's scope.\\
+Empty library or no matches & A distinct empty state. & Separates missing content from a read failure.\\
+Image loading fails & Retry action. & Supports temporary URI or decoding problems.\\
+Missing/inconsistent model & Visible model error. & Makes asset problems actionable.\\
+Unknown or outdated person & Prompt to add a person or update their face photo. & Prevents silent use of invalid references.\\
+Copy in progress or failure & Disable repeat save; show success or error feedback. & Avoids duplicate operations and explains outcomes.\\
+\end{reporttable}
+
+\subsection{Adaptive Layout and Interaction}
+
+Photo grids choose their column count from available width. The viewer supports pinch/pan, double-tap zoom, and resetting zoom. In landscape it places the image beside scrollable actions. The application follows system light/dark appearance, and saved-person removal requires confirmation. \source{R4}
+
+Vietnamese inputs preserve the keyboard's composing region during Telex/VNI entry. Text is normalized on submission rather than rewritten on each keystroke. This matters because prematurely replacing the input text can disrupt accent composition. \source{R9}
+
+\subsection{Lifecycle Continuity}
+
+Search drafts and filter edits use saved state. Navigation requests remain in ViewModel state until handled, including a search that finishes during rotation. After process death, transient search/result destinations return to the restored draft; persisted people, history, and indexes remain in Room. An interrupted foreground search is restarted from the restored query rather than resumed at an intermediate execution point. \source{R4}
+
+\sources{\source{R2}, \source{R4}, \source{R7}, \source{R9}, \source{R10}, \source{R12}}
+
+\reportsection{Application Architecture}
+
+The application adopts a \textbf{Model--View--ViewModel (MVVM) architecture with repository-based data access}. Compose renders state and sends actions to SearchViewModel. Repositories coordinate persistence, Android media access, and AI services. AppContainer constructs these dependencies once for the application; there is no dependency-injection framework or remote service layer. \source{R5}
+
+
+\begin{center}
+\begin{tabular}{c}
+\textbf{Compose screens + Navigation} \\
+User actions and lifecycle-aware state collection \\
+$\downarrow$ \\
+\textbf{SearchViewModel} \\
+Drafts, UI state, cancellable work, navigation state \\
+$\downarrow$ \\
+\textbf{Repositories + AI services} \\
+Search, OCR, people, media access, copying \\
+$\downarrow$ \\
+\textbf{Room / MediaStore / bundled models} \\
+Private index / device originals / local inference \\[5pt]
+PhotoIndexWorker $\rightarrow$ Repositories + AI services
+\end{tabular}
+\end{center}
+
+
+\reportfigurecaption{architecture}{Application layers and dependency direction. Observable state returns to the interface; background indexing uses the same repositories through AppContainer.}
+
+\reporttablecaption{architecture}{Software Components and Responsibilities}
+\begin{reporttable}{P{\dimexpr0.2800\linewidth-2\tabcolsep\relax}P{\dimexpr0.7200\linewidth-2\tabcolsep\relax}}
+\textbf{Package / component} & \textbf{Responsibility}\\\hline
+\code{ui/} and MainActivity & Compose screens, navigation, lifecycle-aware collection, user feedback, ViewModel orchestration.\\
+\code{domain/model/} & Media items, filters, results, albums, indexing states, and typed UI errors.\\
+\code{data/repository/} & Search/history coordination, image references, face indexing, text caching, incremental planning.\\
+\code{data/db/} & Room entities, DAOs, migrations, transactions, and embedding serialization.\\
+\code{data/mediastore/} & Device metadata, thumbnails, library changes, and byte-preserving photo copies.\\
+\code{ai/} and \code{worker/} & Model contracts, preprocessing, inference, retrieval, and resumable indexing work.\\
+\end{reporttable}
+
+This separation allows mathematical ranking and incremental planning to be tested without the full UI. SearchCandidateSource abstracts candidate access, while model interfaces allow repository tests to substitute deterministic encoders. UI behavior, Room, and real bundled inference are also exercised through instrumentation tests. \source{R12}
+
+\sources{\source{R5}, \source{R6}, \source{R7}, \source{R10}, \source{R12}}
+
+\reportsection{Data Persistence and Schema Migration}
+
+Room opens \code{photo-search.db} in application-private storage at schema version 4. MediaStore remains the owner of the original photos. The image index stores content URIs and metadata rather than filesystem paths or copies of full-resolution image bytes. Saved people separately retain a small JPEG reference thumbnail. \source{R5}, \source{R6}
+
+
+\begin{center}
+\begin{tabular}{lll}
+\textbf{Parent / source} & \textbf{Relation} & \textbf{Child / target} \\
+\hline
+\code{media\_embeddings} & $\rightarrow$ & \code{photo\_text} \\
+\code{media\_embeddings} & $\rightarrow$ & \code{face\_index} \\
+\code{media\_embeddings} & $\rightarrow$ & \code{face\_embeddings} \\
+\code{photo\_text} & $\rightarrow$ & \code{photo\_text\_fts} \\
+\hline
+\end{tabular}
+
+\small Independent tables: \code{people}, \code{search\_history}, \code{indexing\_state}.
+\end{center}
+
+
+\reportfigurecaption{schema}{Database relationships. Photo-dependent records use cascading foreign keys, while \code{photo\_text\_fts} is synchronized with \code{photo\_text}.}
+
+\subsection{Representation and Lifecycle}
+
+A normal image vector contains 512 Float32 values serialized by EmbeddingCodec. At four bytes per value, the raw vector payload is \textbf{2,048 bytes per photo}: 20.48 MB for 10,000 photos before metadata and database overhead. Face vectors add storage per detected face; OCR and saved thumbnails add variable amounts.
+
+A media row with \code{embeddingDimension = 0} represents known metadata awaiting visual inference. OCR can attach to this row and become searchable first. Normal search excludes these pending rows. Completing the visual vector for the same revision preserves already-written OCR data.
+
+\reporttablecaption{migrations}{Database Migration History}
+\begin{reporttable}{P{\dimexpr0.2000\linewidth-2\tabcolsep\relax}P{\dimexpr0.8000\linewidth-2\tabcolsep\relax}}
+\textbf{Migration} & \textbf{Preserved or added behavior}\\\hline
+1 \(\rightarrow\) 2 & Add saved people and a unique handle index while retaining existing semantic data and history.\\
+2 \(\rightarrow\) 3 & Add per-photo face state and per-face vectors; mark existing person-reference model types for explicit re-enrollment.\\
+3 \(\rightarrow\) 4 & Add original/folded OCR text, an FTS4 index and synchronization triggers, plus history search-mode storage.\\
+\end{reporttable}
+
+OCR and face writes compare the current parent revision inside a transaction. An obsolete inference result cannot attach to a newer indexed photo revision. Updating a photo invalidates dependent old data; deleting its parent cascades to its OCR and face records. History insertions retain only the latest 100 text searches. Uninstalling or clearing app data removes this private database.
+
+\sources{\source{R2}, \source{R5}, \source{R6}, \source{R12}}
+
+\reportsection{Semantic and Multimodal Retrieval}
+
+\subsection{Query Preparation}
+
+MobileCLIP2-S0 maps text and images into a shared 512-dimensional space. Library images are represented by image embeddings; a query may supply a text embedding, a reference-image embedding, or both. All vectors are L2-normalized. \source{R7}, \source{R13}
+
+Text uses the exported OpenCLIP byte-BPE tokenizer contract, including a 77-token context and vocabulary/merges assets. Image preprocessing follows the generated configuration: RGB input, shortest-edge bicubic resize, center crop to 256 \(\times\) 256, and conversion to Float32 NCHW values in the declared range. The two graphs must originate from the same checkpoint/export.
+
+
+\begin{center}
+\begin{tabular}{c@{\quad$\rightarrow$\quad}c@{\quad$\rightarrow$\quad}c}
+\textbf{Prepare Query} & \textbf{Filter Candidates} & \textbf{Rank Results} \\[3pt]
+Text, image, identities & Dates and face matching & Similarity and top 100
+\end{tabular}
+\end{center}
+
+
+\reportfigurecaption{retrieval}{Semantic retrieval pipeline. Person references constrain candidate selection before visual ranking; OCR follows the separate procedure described in Section 10.}
+
+\subsection{Similarity and Result Selection}
+
+For an L2-normalized query vector \(\mathbf q\) and image vector \(\mathbf x\), cosine similarity is computed as the dot product. When both modalities are supplied, the normalized text vector \(\mathbf t\) and reference-image vector \(\mathbf v\) receive equal weight:
+
+\begin{align}
+\operatorname{score}(\mathbf q,\mathbf x)&=\sum_{i=0}^{511}q_i x_i,\label{eq:similarity}\\
+\mathbf q_{\text{combined}}&=\frac{0.5\mathbf t+0.5\mathbf v}{\lVert0.5\mathbf t+0.5\mathbf v\rVert_2}.\label{eq:combined}
+\end{align}
+
+The combined-query expression applies when both text and a selected reference image are present. A single modality uses its own normalized vector. Face embeddings never enter this combination. People-only queries can instead rank by their face-match score.
+
+The engine reads Room candidates in pages of 512 and maintains a bounded min-heap. For \(N\) candidates, vector dimension \(D=512\), and result limit \(K=100\), the core scoring and ranking cost is approximately \(O(ND+N\log K)\), excluding database access and face matching. Candidate pagination bounds the image-vector working set, and heap selection avoids a complete result sort. OCR match identifiers and index-planning metadata may still scale with library size.
+
+Normal query selects the best 100 relevant photos first. Newest/oldest sorting then reorders those selected matches. Ties use photo dates and media IDs for deterministic results. This differs from OCR chronological search, which selects the correct date-ordered 100 from the complete text-match set. \source{R7}
+
+\subsection{Runtime Contract and Interpretation}
+
+ONNX sessions are initialized lazily and retained for the process. Inference uses serialization and two intra-op threads to limit CPU contention. The runtime checks configured tensor shapes, types, and tokenizer vectors and reports incompatible assets. A displayed match percentage is a normalized relevance indicator, not model confidence or a measured likelihood that the photo satisfies the query.
+
+\sources{\source{R2}, \source{R7}, \source{R13}}
+
+\reportsection{Person Enrollment and Face Matching}
+
+\subsection{Enrollment and Local References}
+
+People search begins with explicit enrollment. The user opens People, selects one clear photo, and saves a name. Names support 1–40 Unicode letters, numbers, or underscores; spaces become underscores and handles are case-insensitive. Duplicate handles are rejected. A person named “Mai Anh” can be referenced as \code{@mai\_anh}. \source{R8}
+
+Enrollment requires exactly one detected face, a detection score of at least 0.7, and face dimensions of at least 60 pixels in the bounded decoded image. No-face, group, or unclear selections produce an error. The application stores a reference thumbnail, normalized face vector, and model version. The saved reference is independent of the original picker URI. Change face photo replaces the reference while preserving the name and handle.
+
+\subsection{Detection and Representation}
+
+\reporttablecaption{face-pipeline}{Face Processing Pipeline}
+\begin{reporttable}{P{\dimexpr0.2500\linewidth-2\tabcolsep\relax}P{\dimexpr0.7500\linewidth-2\tabcolsep\relax}}
+\textbf{Stage} & \textbf{Implementation}\\\hline
+Original decoding & Apply EXIF orientation and bound the longest side to 1280 pixels, retaining the full frame.\\
+Detection & SCRFD \code{det\_500m.onnx}; 640 \(\times\) 640 RGB input, detection cutoff 0.5, non-maximum suppression IoU 0.4.\\
+Alignment & Use five detected landmarks to align the face to the 112 \(\times\) 112 ArcFace template.\\
+Recognition & MobileFaceNet \code{w600k\_mbf.onnx}; produce a 512-D L2-normalized face vector.\\
+Caching & Store up to 64 face vectors sequentially per photo plus completion/model-version state, including no-face outcomes.\\
+\end{reporttable}
+
+Face vectors occupy their own model space. They are not compared to CLIP image vectors even though both happen to have 512 dimensions. Old whole-photo person references are marked for Update face rather than silently treated as face-recognition embeddings.
+
+\subsection{Multiple-person Semantics}
+
+For \code{@alex @mai at the beach}, the parser resolves both saved references and removes the mentions from the scene text. Each identity must match a \textbf{distinct} face with cosine similarity at least 0.45. Only photos satisfying that condition proceed to CLIP ranking for “at the beach.” A single ambiguous face cannot satisfy both people. Query resolution reuses stored vectors and does not rerun enrollment inference.
+
+The threshold is an initial, uncalibrated operating point. Pose, lighting, face size, occlusion, and similar-looking people can cause errors. The repository documents a non-commercial research restriction for the supplied InsightFace pretrained weights. Face-model provenance and the exact bundled hashes are recorded in FACE\_MODELS.md. \source{R8}
+
+\sources{\source{R2}, \source{R8}, \source{R12}}
+
+\reportsection{Vietnamese OCR and Text Retrieval}
+
+\subsection{Recognition and Caching}
+
+The application uses bundled ML Kit Latin Text Recognition through \code{com.google.mlkit:text-recognition:16.0.1}. Its assets are packaged by the Android dependency, so OCR does not require a separate ONNX model file or an initial runtime download. The repository identifies the cache model as \code{mlkit-latin-16.0.1-vi-v1}. \source{R9}
+
+PhotoTextRepository decodes an EXIF-oriented, full-frame image with a longest side of at most 2048 pixels. The larger OCR input preserves more small lettering than the semantic thumbnail. Recognized Unicode text and a search-normalized version are written to Room with the photo revision, model version, and truncation state.
+
+Successful scans containing no text are cached. Failures remain eligible for a later pass, and changed photos or model versions invalidate old text. At most 100,000 characters are stored per image, with truncation surfaced in the reader. On-demand reading can recognize a photo that has not yet completed background OCR.
+
+\subsection{Accent-insensitive Word Matching}
+
+The index decomposes Unicode, removes combining marks, maps \code{đ} to \code{d}, lowercases text, and turns punctuation into word separators. Original text remains available for display and copying. User input is converted to quoted literal terms for the FTS4 query; it is not treated as executable FTS syntax. A query permits at most 64 distinct terms. \source{R9}
+
+\reporttablecaption{ocr}{OCR Query Semantics and Boundaries}
+\begin{reporttable}{P{\dimexpr0.2800\linewidth-2\tabcolsep\relax}P{\dimexpr0.3500\linewidth-2\tabcolsep\relax}P{\dimexpr0.3700\linewidth-2\tabcolsep\relax}}
+\textbf{Example input} & \textbf{Search interpretation} & \textbf{Boundary}\\\hline
+\code{hóa đơn} or \code{hoa don} & Match the normalized words “hoa” and “don.” & Accents may be omitted; all terms must match.\\
+\code{70.000} & Match normalized number tokens separated by punctuation. & Does not validate a monetary amount or parse bill fields.\\
+\code{@thảo hóa đơn} & Resolve the saved identity and require the OCR terms. & Requires face indexing and an enrolled matching handle.\\
+A translated synonym & Match only the entered words after normalization. & No translation, fuzzy spelling, or semantic OCR matching.\\
+\end{reporttable}
+
+\subsection{Search Behavior and User Value}
+
+OCR search does not invoke the CLIP text encoder, and OCR matches do not influence Normal-query ranking. It can retrieve metadata-only photo rows before their visual embeddings exist. Candidate reads omit image-vector bytes when OCR does not need them. An empty text-match set returns early.
+
+Date sorting is applied while selecting OCR matches, giving the true oldest/newest 100 across all matching pages. The reader displays original accents and supports selection/copying. Sharp printed text and screenshots are suitable inputs; tiny text, blur, handwriting, and poor contrast can lower recognition quality. Vietnamese text entry and OCR support do not establish Vietnamese semantic understanding by CLIP.
+
+\sources{\source{R2}, \source{R6}, \source{R7}, \source{R9}, \source{R12}}
+
+\reportsection{Incremental Indexing and Reliability}
+
+\subsection{Work Scheduling and Per-photo Progress}
+PhotoIndexScheduler enqueues unique WorkManager work with a battery-not-low constraint and the KEEP policy. Repeated requests do not create one worker per photo. The worker queries accessible MediaStore images newest-first and compares media IDs and modification times with persisted index state. Networking and charging are not required. \source{R10}
+
+\reporttablecaption{indexing}{Incremental Indexing Decisions}
+\begin{reporttable}{P{\dimexpr0.2473\linewidth-2\tabcolsep\relax}P{\dimexpr0.7527\linewidth-2\tabcolsep\relax}}
+\textbf{Photo condition} & \textbf{Worker behavior}\\\hline
+New photo & Create the necessary metadata, run pending OCR, visual, and face stages, and persist successful results.\\
+Unchanged photo & Reuse completed stages; backfill missing or outdated OCR and face indexes.\\
+Modified photo & Invalidate older dependent data and compute results for the new revision.\\
+Removed or inaccessible photo & Reconcile the accessible MediaStore snapshot and remove obsolete index rows. A fully denied permission state is detected before treating the library as empty.\\
+Unreadable photo & Record/log the failure and continue processing other images. Refresh provides another attempt at pending work.\\
+\end{reporttable}
+
+Within a photo, pending OCR is attempted first, followed by visual embedding and face work. Each stage has its own cached completion information. This permits OCR and visual search to become useful incrementally rather than waiting for an entire library-wide OCR pass. A missing visual model can be reported while OCR processing continues.
+
+\subsection{Consistency During Asynchronous Work}
+Successful writes are committed as processing advances, so an interruption does not discard previously completed photos. At the end of a pass, the worker compares a fresh MediaStore snapshot with the starting snapshot. A changed library requests another incremental pass.
+
+Room transactions compare parent photo revisions before attaching OCR or face results. A visual write older than the current parent revision is also rejected. Completing a visual embedding for the same revision retains text already scanned for that photo. These rules address consistency risks arising from concurrent library refresh, on-demand OCR, and background inference. \source{R6}
+
+\subsection{Resource Control and Cancellation}
+The worker uses a controlled sequence rather than launching a coroutine for every photo. Semantic thumbnails are 256\(\times\)256; face decoding and OCR use separate bounded full-frame images. Bitmaps are released as processing progresses. CLIP inference sessions are retained and use two intra-op threads; model calls are serialized with mutexes.
+
+Coroutine cancellation is checked between work units and during candidate scanning. ML Kit's task cannot itself be cancelled, so the recognizer waits for that task to finish before its bitmap can be recycled. WorkManager constraints can delay background processing; the UI therefore separates waiting from running and preserves useful saved progress.
+
+\sources{\source{R2}, \source{R6}, \source{R9}, \source{R10}}
+
+\reportsection{Technology Stack and Configuration}
+
+The technology inventory below records the versions declared in the repository. The Kotlin Compose plugin version is distinguished from the Android Gradle Plugin's built-in Kotlin integration. \source{R14}
+
+\reporttablecaption{technologies}{Declared Technology Versions and Roles}
+\begin{reporttable}{P{\dimexpr0.3444\linewidth-2\tabcolsep\relax}P{\dimexpr0.2222\linewidth-2\tabcolsep\relax}P{\dimexpr0.4333\linewidth-2\tabcolsep\relax}}
+\textbf{Technology} & \textbf{Declared version} & \textbf{Purpose}\\\hline
+Android Gradle Plugin & 9.2.1 & Android compilation and APK packaging.\\
+Gradle wrapper & 9.4.1 & Reproducible build entry point.\\
+Kotlin Compose plugin & 2.2.10 & Kotlin-based Compose integration.\\
+KSP & 2.2.10-2.0.2 & Room source generation.\\
+Compose BOM / Material 3 & 2025.08.01 & Declarative UI and component styling.\\
+Navigation / Lifecycle & 2.9.3 / 2.9.3 & Destinations, ViewModel, lifecycle-aware state.\\
+Room / SQLite FTS4 & 2.7.2 & Persistent index, migrations, literal text search.\\
+WorkManager & 2.10.3 & Constrained, persistent background indexing.\\
+Coil Compose & 3.3.0 & Loading device media images into Compose.\\
+ONNX Runtime Android & 1.22.0 & Local CLIP and face-model inference.\\
+ML Kit text recognition & 16.0.1 & Bundled offline Latin/Vietnamese OCR.\\
+JUnit / coroutine tests & 4.13.2 / 1.10.2 & Unit assertions and asynchronous test control.\\
+AndroidX JUnit / Espresso & 1.3.0 / 3.7.0 & Android instrumentation support.\\
+\end{reporttable}
+
+\subsection{SDK and JVM Settings}
+The application has \code{minSdk = 29}, \code{targetSdk = 36}, and a compile SDK of API 36 with minor API level 1. It uses application ID \code{com.example.mobile\_image\_retrieval}, versionCode 1, and versionName 1.0. Gradle daemon criteria select \textbf{JDK 21}, while Java source and target compatibility are \textbf{17}. The daemon runtime and Java compilation target serve distinct toolchain roles.
+
+\subsection{Bundled Model Assets}
+\reporttablecaption{assets}{Bundled ONNX Model Assets}
+\begin{reporttable}{P{\dimexpr0.5889\linewidth-2\tabcolsep\relax}P{\dimexpr0.1889\linewidth-2\tabcolsep\relax}P{\dimexpr0.2222\linewidth-2\tabcolsep\relax}}
+\textbf{Asset inspected} & \textbf{Size (MB)} & \textbf{Role}\\\hline
+\code{mobileclip2\_s0\_image.onnx} & 45.57 & Image encoder\\
+\code{mobileclip2\_s0\_text.onnx} & 253.89 & Text encoder\\
+\code{det\_500m.onnx} & 2.52 & Face detector\\
+\code{w600k\_mbf.onnx} & 13.62 & Face recognizer\\
+\end{reporttable}
+
+Sizes use decimal MB and describe raw files, not installed memory use. The four graphs total approximately 315.60 MB, before tokenizer assets, OCR, libraries, and APK overhead. ONNX assets are packaged uncompressed. The generated model configuration also records its Python export environment; those exporter versions are separate from Android runtime dependencies.
+
+\sources{\source{R3}, \source{R8}, \source{R9}, \source{R13}, \source{R14}}
+
+\reportsection{Development Environment and Build Procedure}
+\label{sec:setup}
+
+\subsection{Prerequisites}
+Use Android Studio with support for the project's Android Gradle Plugin, the Android SDK platform matching compile API 36.1, SDK Platform-Tools, and an Android 10+ device or emulator. Configure JDK 21 for Gradle's daemon criteria. The project compiles Java-compatible sources for level 17. Use the included Gradle wrapper rather than substituting a different Gradle installation. \source{R14}
+
+Initial SDK, Gradle, and dependency setup can require internet access on the development computer. This is separate from the application's offline runtime behavior. Allow sufficient disk space for the model files, dependency caches, build outputs, and an emulator if used.
+
+\subsection{Prepare the Source and Assets}
+\begin{enumerate}
+\item Obtain the submitted source tree or clone the project repository, then open its root directory in Android Studio. The root contains \path{settings.gradle.kts} and \path{gradlew}.
+\item Use SDK Manager to install the matching Android SDK components. Let Android Studio write the machine-specific \path{local.properties}, or set its \code{sdk.dir} to the actual local SDK path. This file is intentionally gitignored.
+\item Confirm the seven model/configuration files below are present in \path{app/src/main/assets/models/}. The two large CLIP ONNX graphs are gitignored and must accompany a source-only submission separately.
+\end{enumerate}
+
+\begin{verbatim}
+mobileclip2_s0_image.onnx
+mobileclip2_s0_text.onnx
+mobileclip2_s0_config.json
+mobileclip2_s0_vocab.json
+mobileclip2_s0_merges.txt
+det_500m.onnx
+w600k_mbf.onnx
+\end{verbatim}
+
+Use the CLIP graphs, tokenizer files, and configuration from the same verified export. Do not mix model checkpoints. If regeneration is necessary, inspect \path{tools/export_mobileclip2.py} and regenerate the export as one set. OCR assets arrive through the bundled ML Kit dependency and are not an additional manual file download. \source{R9}, \source{R13}
+
+\subsection{Build From the Project Root}
+On Linux or macOS, the wrapper can be invoked through Bash even when its executable bit is absent:
+\begin{verbatim}
+bash ./gradlew :app:assembleDebug
+bash ./gradlew :app:testDebugUnitTest :app:lintDebug
+\end{verbatim}
+On Windows, use \code{.\textbackslash gradlew.bat} in place of \code{bash ./gradlew}. Android Studio can also sync and run the application. A successful debug build produces \path{app/build/outputs/apk/debug/app-debug.apk}. No backend server, API key, or remote database configuration is required.
+
+\sources{\source{R2}, \source{R9}, \source{R13}, \source{R14}}
+
+\reportsection{Installation and Operating Procedures}
+
+\subsection{Install and Open the Application}
+For an emulator, launch an Android 10+ virtual device. For a physical device, enable USB debugging and accept the computer's debugging authorization. From the project root:
+\begin{verbatim}
+adb devices
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell am start -n \
+  com.example.mobile_image_retrieval/.MainActivity
+\end{verbatim}
+Alternatively, copy the APK to the device and open it with Android's package installer, allowing installation from that source if prompted. Updating an existing installation requires the same application ID and a compatible signing key. The \code{-r} option preserves existing app data when a compatible update succeeds; uninstalling first removes the private index.
+
+\subsection{First-run Procedure}
+\begin{enumerate}
+\item Grant photo access. Android 10--12L uses \code{READ\_EXTERNAL\_STORAGE}; Android 13+ uses \code{READ\_MEDIA\_IMAGES}. Android 14+ also supports selected-photo access through \code{READ\_MEDIA\_VISUAL\_USER\_SELECTED}.
+\item Start with a small accessible set containing a clear scene, a single-face portrait, and a legible Vietnamese screenshot or receipt. Open Albums to confirm actual device photos are visible.
+\item Observe OCR and visual indexing progress. A battery-not-low constraint can leave background work queued. Search completed photos while remaining stages continue.
+\item Try Normal query with an English scene description, OCR search with known visible words, and a saved handle after enrolling a person. Then open a result and use Read text or Save a copy.
+\item Close and reopen the same installation to check retained people, history, and indexing progress. Search and browse in airplane mode after assets are packaged and access is granted.
+\end{enumerate}
+
+\subsection{Common Problems and Recovery}
+\reporttablecaption{recovery}{Common Operating Problems and Recovery Procedures}
+\begin{reporttable}{P{\dimexpr0.3226\linewidth-2\tabcolsep\relax}P{\dimexpr0.6774\linewidth-2\tabcolsep\relax}}
+\textbf{Symptom} & \textbf{Action}\\\hline
+Model unavailable & Check both CLIP graphs and matching config/tokenizer files; rebuild the APK after correcting assets.\\
+No photos or incomplete library & Check permissions, selected-photo scope, and Albums refresh. A fresh emulator may have no photos.\\
+Few search results & Wait for the relevant indexing stage, then use Search again. Try words or scenes actually present in accessible photos.\\
+Person query rejected & Add the handle in People or use Update face for an outdated reference. Choose a clear single-face enrollment photo.\\
+Save a copy fails & Check readable source access and free storage, then retry. The implementation attempts to remove an incomplete destination.\\
+Install reports a signature conflict & Obtain a build signed with the existing key to retain app data; do not assume an unrelated debug key can update it.\\
+\end{reporttable}
+
+Saved copies are written to \path{Pictures/Photo Search} and shown in Recently Added by addition time. Deletion uses Android's consent mechanism where required. Sharing opens compatible external apps only when the user requests it.
+
+\sources{\source{R2}, \source{R3}, \source{R4}, \source{R10}, \source{R11}}
+
+\reportsection{Testing Methodology and Validation Results}
+
+\subsection{Recorded Execution Results}
+The execution results below are reported in the project audit dated 5 September 2026, as documented in \path{COURSE_REQUIREMENTS.md}. They are reproduced as recorded validation evidence; no independent Android test execution was conducted as part of this document review. \source{R1}
+
+\reporttablecaption{validation}{Validation Results Reported in the Project Audit}
+\begin{reporttable}{P{\dimexpr0.3226\linewidth-2\tabcolsep\relax}P{\dimexpr0.6774\linewidth-2\tabcolsep\relax}}
+\textbf{Recorded check} & \textbf{Recorded outcome}\\\hline
+Debug build & Passed; four ONNX assets bundled uncompressed. Universal debug APK: 502,532,800 bytes.\\
+JVM unit tests & 63 passed, 0 failures.\\
+Android instrumentation & 40 passed, 0 failures on Android 16 / API 36.1 emulator.\\
+Android lint & 0 errors; 21 dependency/API-version and KTX-style warnings.\\
+Manual continuity check & Viewer retained the selected photo on rotation. After process termination/relaunch, the ``sunset'' draft/history returned with 475/475 photos still indexed.\\
+Cold visual query & Approximately 8.2 seconds on the evaluated emulator, including model initialization. The loading UI remained available.\\
+\end{reporttable}
+
+The recorded checks establish coverage of specified functional and reliability scenarios. The latency measurement represents a single cold query and does not characterize a distribution or sustained indexing throughput. Statistical retrieval accuracy and cross-device performance require separate evaluation.
+
+\subsection{Test Coverage}
+Unit tests cover vector math, embedding output validation, exact top-K ranking, deterministic ties, OCR date ordering across pages, mention parsing, distinct face assignment, Vietnamese normalization, date bounds, and incremental planning. Instrumentation covers Room migrations/cascades, revision protection, OCR search before visual indexing, real bundled OCR/CLIP/face inference, copy success/failure cleanup, Vietnamese keyboard composition, filter restoration, and landscape viewer actions. \source{R12}
+
+\subsection{Supplementary Source and Asset Verification}
+Source inspection counted \textbf{63 unit-test annotations across 13 files} and \textbf{40 instrumentation-test annotations across 13 files}, consistent with the audit's counts. The two CLIP graphs, vocabulary, and merges file were present and their SHA-256 hashes matched the generated configuration. The supplied face inspection script read both ONNX contracts and hashes; those hashes matched FACE\_MODELS.md.
+
+The supplementary review verified source structure and asset consistency. Build, lint, and runtime outcomes remain attributed to the project audit; the asset checks do not constitute an additional inference benchmark.
+
+\subsection{Reproducing Runtime Checks}
+After completing Section~\ref{sec:setup}, run \code{:app:testDebugUnitTest}, \code{:app:lintDebug}, and \code{:app:connectedDebugAndroidTest} with the wrapper. Use a dedicated test emulator. The project's \code{android.injected.androidTest.leaveApksInstalledAfterRun=true} setting retains installed APKs after connected tests to reduce unintended loss of a development index.
+
+\sources{\source{R1}, \source{R8}, \source{R12}, \source{R13}, \source{R14}}
+
+\reportsection{Self-Assessment Against the Course Rubric}
+
+\subsection{Assessment Method}
+The self-assessment maps implemented capabilities and documented evidence to the course marking rubric. A capability is classified as implemented when it is supported by an identifiable source component and relevant audit or test evidence. The implementation criteria account for 90\% of the available marks; report, presentation, and collaboration account for the remaining 10\%. Final grading remains subject to assessor review. \source{R1}
+
+\reporttablecaption{assessment}{Self-Assessment Against the Course Marking Rubric}
+\begin{reporttable}{P{\dimexpr0.2667\linewidth-2\tabcolsep\relax}P{\dimexpr0.1000\linewidth-2\tabcolsep\relax}P{\dimexpr0.6333\linewidth-2\tabcolsep\relax}}
+\textbf{Criterion} & \textbf{Weight} & \textbf{Self-assessment and remaining evidence}\\\hline
+Functional completeness & 30\% & Implemented: text/image/combined visual search, enrolled people, OCR, filters, albums, viewing, text reading, sharing, deletion, and copying. Audit records successful build and tests. Recognition remains approximate; unsupported videos and album editing are outside reported scope.\\
+Technical quality and source & 25\% & Separated interface, ViewModel, and repository responsibilities; explicit Room migrations; coroutine-based execution; WorkManager scheduling; runtime permissions; and revision checks. Tests address failure and lifecycle scenarios. Physical-device and large-library profiling require further evaluation.\\
+UI and UX & 20\% & Eight connected feature screens; two clear query modes; adaptive grids, light/dark themes, zoom, landscape actions, and distinct loading/empty/error/access states. No formal usability study is supplied.\\
+Originality and complexity & 15\% & Integration of offline cross-modal retrieval, distinct-person matching, Vietnamese OCR/FTS, persistence, and Android media operations using pretrained models. Comparative originality and suitability for the confirmed group size remain subject to assessor review.\\
+Report, presentation, collaboration & 10\% & Required report subjects, demonstration protocol, and work-division table are documented. Contributor attribution and evidence of video and presentation delivery remain outstanding.\\
+\end{reporttable}
+
+\subsection{Completed Application Work}
+The implementation meets the explicitly supplied capability categories: connected screens, local storage, permitted native stack, installable Android packaging, and device integration. The source and course audit identify no missing feature against those explicit implementation requirements. Successful persistence, storage operations, indexing, and real-model paths have specific recorded tests.
+
+\subsection{Outstanding Work}
+Outstanding evaluation work comprises calibrated visual, face, and OCR accuracy measurements; tests on representative physical devices; and memory and battery profiling for larger libraries. Administrative completion requires confirmed contributor attribution and evidence of demonstration and presentation delivery. Accordingly, the assessment reports criterion-level evidence rather than assigning an unsupported numerical score.
+
+\subsection{Overall Assessment}
+Version 1.0 provides an integrated Android implementation of offline visual, identity-based, and text-based photo retrieval. The documented results support completion of the specified application capabilities. Further work should prioritize representative device evaluation, retrieval-quality measurement, and completion of contributor and presentation records.
+
+\sources{\source{R1}, \source{R2}, \source{R12}}
+
+\reportsection{Limitations and Future Development}
+
+\subsection{Current Practical Limits}
+Bundling models enables offline first use but produces a large installation artifact. The audit reports a universal debug APK of approximately 502.5 MB. First initialization and full-library indexing can be slow, particularly on an emulator. The 8.2-second cold-query observation includes initialization and should not be described as every query's latency. \source{R1}
+
+Normal-query visual descriptions work best in English. Vietnamese input handling and OCR improve text entry and literal text retrieval but do not make CLIP a Vietnamese semantic model. OCR can miss small, blurred, handwritten, or poorly contrasted text. Face detection can miss small or obscured faces, and uncalibrated identity matching can produce false matches.
+
+\reporttablecaption{tradeoffs}{Architectural Trade-Offs}
+\begin{reporttable}{P{\dimexpr0.3118\linewidth-2\tabcolsep\relax}P{\dimexpr0.6882\linewidth-2\tabcolsep\relax}}
+\textbf{Design choice} & \textbf{Benefit and cost}\\\hline
+Exact local vector scan & Straightforward, deterministic candidate ranking with bounded vector pages; scan time grows with the number of candidates. The top-100 cap limits the displayed set.\\
+Separate OCR and visual modes & Clear task semantics and independent progress; users must choose the mode that matches their intent.\\
+Explicit person enrollment & User-selected names and references; no automatic discovery, clustering, or naming of everyone in the library.\\
+Local private database & No application upload path and useful offline persistence; uninstall/clear-data removes the application's index, people, and history.\\
+Full-frame bounded OCR/face decode & Better retention of faces and text than a cropped semantic thumbnail; additional decoding cost and resolution-dependent misses.\\
+\end{reporttable}
+
+The product indexes accessible images only. Video frame sampling, temporal video search, favorites, automatic scene splitting, and album editing are not implemented. The repository documents restrictions on the supplied face weights, so deployment beyond the documented research use requires resolving model rights separately. \source{R2}, \source{R8}
+
+\subsection{Prioritized Future Work}
+\begin{enumerate}
+\item \textbf{Measure target-device behavior.} Record cold/warm query latency, indexing photos per minute, peak memory, database growth, and battery use on representative phones and library sizes.
+\item \textbf{Evaluate retrieval quality.} Build a consented, representative evaluation set with relevant-photo labels. Measure visual recall/precision, OCR term retrieval, and face false matches/misses before selecting thresholds.
+\item \textbf{Reduce resource cost.} Evaluate a verified accelerated or smaller export, configurable indexing policy, ABI-specific packaging, and an explicit FP16 storage migration, preserving model-contract checks.
+\item \textbf{Extend only from measured needs.} Add video indexing or album editing as separately scoped features. Consider an approximate local index only if profiling shows exact scanning is insufficient.
+\end{enumerate}
+
+\sources{\source{R1}, \source{R2}, \source{R7}, \source{R8}, \source{R13}}
+
+\reportsection{Work Allocation and Collaboration}
+\label{sec:division}
+
+\subsection{Team Composition}
+The final project for \CourseCode{}: \CourseTitle{} is submitted by the following four-member team:
+
+\begin{center}
+\TeamMembers
+\end{center}
+
+\subsection{Attribution Status}
+The work-division table identifies the principal work packages, associated deliverables, and available completion evidence. Team membership and student IDs are confirmed above; responsibility for individual work packages remains subject to team confirmation. Contribution percentages are omitted because an agreed allocation has not been provided.
+
+\reporttablecaption{contributions}{Work Allocation and Deliverable Status}
+\begin{reporttable}{P{\dimexpr0.2333\linewidth-2\tabcolsep\relax}P{\dimexpr0.2444\linewidth-2\tabcolsep\relax}P{\dimexpr0.5222\linewidth-2\tabcolsep\relax}}
+\textbf{Work package} & \textbf{Member / student ID} & \textbf{Deliverable and completion evidence}\\\hline
+Requirements and product scope & \pending & Requirement mapping, topic, use cases, and demonstration sequence in COURSE\_REQUIREMENTS.md and README. Documentation exists.\\
+Compose UI and navigation & \pending & Eight feature screens, adaptive grids, viewer interactions, permission states, saved-state handling. Implemented in MainActivity and ui/.\\
+Data and Android integration & \pending & Room schema/migrations, MediaStore browsing, history, copying, sharing/deletion integration. Implemented in data/ and MainActivity.\\
+Visual retrieval & \pending & Export contract, CLIP preprocessing/tokenization, embeddings, exact top-K, image/text combination. Implemented in ai/ and export tooling.\\
+Face enrollment and search & \pending & SCRFD/MobileFaceNet integration, alignment, references, distinct-person matching, versioned caches. Implemented in ai/ and repositories.\\
+Vietnamese OCR & \pending & Bundled recognition, accent folding, FTS4, text reader, composing-input preservation. Implemented in OCR/data/UI components.\\
+Background work and quality & \pending & Incremental worker, consistency protection, unit/instrumentation tests and audit evidence. Source and recorded results exist.\\
+Report and presentation & \pending & Report source and demonstration protocol prepared. Final artifact review, presentation delivery, and contributor attribution remain pending confirmation.\\
+\end{reporttable}
+
+\subsection{Attribution Requirements}
+Final attribution should associate each work package with the responsible member or members and their student IDs. Shared assignments should distinguish individual responsibilities. Relevant commits, review records, design documents, test contributions, and demonstration ownership provide supporting evidence for the agreed allocation.
+
+\subsection{Collaboration Assessment}
+The repository's modular structure establishes review boundaries between the interface, persistence, inference, and background-processing components. Tests and the project audit provide integration evidence. Member-specific collaboration records, including review participation and individual deliverables, remain necessary to substantiate the collaboration criterion.
+
+\sources{\source{R1}, \source{R2}, \source{R4}, \source{R5}, \source{R12}}
+
+\reportsection{Presentation and Demonstration Plan}
+
+\subsection{Presentation Structure}
+The proposed presentation follows a sequence from the user problem and application workflow to architecture, validation, and limitations. The approximately eight-minute protocol below defines the demonstration activities and expected evidence. Presenter assignments should reflect confirmed implementation or verification responsibilities; presentation delivery remains pending confirmation.
+
+\reporttablecaption{demonstration}{Proposed Demonstration Schedule}
+\begin{reporttable}{P{\dimexpr0.1444\linewidth-2\tabcolsep\relax}P{\dimexpr0.3444\linewidth-2\tabcolsep\relax}P{\dimexpr0.5111\linewidth-2\tabcolsep\relax}}
+\textbf{Time} & \textbf{Show or explain} & \textbf{Observable evidence}\\\hline
+0:00--0:45 & Topic and users; open the installed app. & A native Android product addressing retrieval from real device photos.\\
+0:45--1:30 & Albums $\to$ album contents $\to$ viewer. & Connected browsing screens using the accessible library.\\
+1:30--2:45 & Normal query by text, by image, and by both; open a result. & Ranked retrieval and an actionable photo result.\\
+2:45--3:20 & Apply a date range/sort in Filters. & Filters update the active query and return to Results.\\
+3:20--4:15 & People: enroll one clear face; use its handle with context. & A retained reference and identity-conditioned search.\\
+4:15--5:15 & OCR search: ``hóa đơn'' and ``hoa don''; Read text. & Accent-insensitive retrieval with original accented text available to copy.\\
+5:15--6:00 & Save a copy; follow View to Recently Added. & A new file in Pictures/Photo Search, preserving the original.\\
+6:00--6:40 & Close/reopen and rotate the viewer. & Persistence and adaptive layout on the demonstrated device.\\
+6:40--8:00 & Architecture, recorded checks, limits, and contributions. & Explain the three model roles, asynchronous indexing, evidence boundaries, and actual member ownership.\\
+\end{reporttable}
+
+\subsection{Demonstration Preparation}
+Demonstration preparation requires a compatible APK installed over the existing application to preserve the index. The selected image set should contain a recognizable scene, a clear enrollment portrait, and legible Vietnamese text. Photo permissions and the required indexing stages should be verified in advance. Query examples should correspond to known content in the accessible collection.
+
+The demonstration should include progress feedback and explain incremental search availability. Preparing the primary examples in advance reduces time spent on initial indexing. Sharing can illustrate a user-initiated Android intent; a disposable copy is suitable for demonstrating the deletion confirmation flow.
+
+\subsection{Submission Deliverables}
+The submission package comprises source code, the required model assets or agreed asset-delivery package, an installable APK containing all models, the final 10--30-page PDF report, and demonstration/presentation evidence. Individual attribution should be confirmed before submission. Because the large CLIP graphs are excluded from version control, the delivered APK requires an explicit asset-completeness check.
+
+\sources{\source{R1}, \source{R2}, \source{R3}, \source{R14}}
+
+\reportsection{References and Supporting Evidence}
+\label{sec:references}
+
+The following repository sources support the implementation descriptions and assessment findings. Paths beginning with \code{java/} are relative to \path{app/src/main/java/com/example/mobile_image_retrieval/}. Upstream model provenance is documented in the referenced asset records.
+
+{\small
+\begin{description}
+\item[R1]\phantomsection\label{src:R1} \textbf{Course requirements and audit.} \path{COURSE_REQUIREMENTS.md}; supplementary minimum capabilities in \path{mobile requirements.md}. Rubric weights, screen mapping, recorded validation, and demonstration steps.
+\item[R2]\phantomsection\label{src:R2} \textbf{Project overview and operating behavior.} \path{README.md}. Implemented features, setup, search semantics, privacy, known limits, and future work.
+\item[R3]\phantomsection\label{src:R3} \textbf{Android permissions and application configuration.} \path{app/src/main/AndroidManifest.xml}; \path{java/permissions/PhotoPermission.kt}; \path{app/src/main/res/xml/backup_rules.xml}; \path{app/src/main/res/xml/data_extraction_rules.xml}.
+\item[R4]\phantomsection\label{src:R4} \textbf{Navigation, UI, and lifecycle.} \path{java/MainActivity.kt}; \path{java/ui/SearchViewModel.kt}; screens and theme under \path{java/ui/}. Screen routes, saved state, viewer actions, and user feedback.
+\item[R5]\phantomsection\label{src:R5} \textbf{Architecture and dependency construction.} \path{java/PhotoSearchApplication.kt}; packages \path{java/data/repository/} and \path{java/domain/model/}. AppContainer, repository boundaries, and domain types.
+\item[R6]\phantomsection\label{src:R6} \textbf{Database and consistency.} \path{java/data/db/PhotoSearchDatabase.kt}, \path{Entities.kt}, \path{PhotoTextEntities.kt}, \path{Daos.kt}, \path{PhotoTextDao.kt}, and \path{EmbeddingCodec.kt} in the same directory; exported versions in \path{app/schemas/}.
+\item[R7]\phantomsection\label{src:R7} \textbf{Semantic and combined retrieval.} \path{java/ai/SemanticSearchEngine.kt}, \path{PersonalizedQuery.kt}, \path{VectorMath.kt}, \path{MobileClipEncoders.kt}, \path{MobileClipTokenizer.kt}, and \path{MobileClipPreprocessor.kt} in \path{java/ai/}; \path{java/data/repository/SearchRepository.kt}.
+\item[R8]\phantomsection\label{src:R8} \textbf{Face models and matching.} \path{app/src/main/assets/models/FACE_MODELS.md}; \path{java/ai/OnnxFaceAnalyzer.kt}, \path{FaceGeometry.kt}, and \path{FaceMatcher.kt} in \path{java/ai/}; \path{java/data/repository/ReferencePhotoRepository.kt}; \path{FaceIndexRepository.kt} in the same directory; \path{tools/inspect_face_models.py}.
+\item[R9]\phantomsection\label{src:R9} \textbf{Vietnamese OCR.} \path{app/src/main/assets/models/OCR_MODELS.md}; \path{java/ai/PhotoTextRecognizer.kt}; \path{java/ai/VietnameseText.kt}; \path{java/data/repository/PhotoTextRepository.kt}; \path{java/ui/screens/PhotoTextScreen.kt} and \path{VietnameseTextField.kt} in the same directory.
+\item[R10]\phantomsection\label{src:R10} \textbf{Incremental work.} \path{java/worker/PhotoIndexWorker.kt}; \path{java/worker/PhotoIndexScheduler.kt}; \path{java/data/repository/IndexingPlanner.kt}.
+\item[R11]\phantomsection\label{src:R11} \textbf{Device media and file operations.} \path{java/data/mediastore/MediaStoreRepository.kt}; \path{java/data/mediastore/PhotoCopyRepository.kt}; sharing/deletion integration in MainActivity.
+\item[R12]\phantomsection\label{src:R12} \textbf{Tests.} Kotlin test sources under \path{app/src/test/} and \path{app/src/androidTest/}. Report inspection counted 63 and 40 \code{@Test} annotations respectively; execution outcomes are attributed separately to R1.
+\item[R13]\phantomsection\label{src:R13} \textbf{CLIP assets and export contract.} \path{app/src/main/assets/models/README.md}; \path{mobileclip2_s0_config.json} in the same directory; \path{java/ai/MobileClipModelConfig.kt}; \path{tools/export_mobileclip2.py}. The four CLIP/config-associated file hashes checked for this report matched the configuration.
+\item[R14]\phantomsection\label{src:R14} \textbf{Build configuration.} \path{app/build.gradle.kts}; \path{gradle/libs.versions.toml}; \path{gradle/wrapper/gradle-wrapper.properties}; \path{gradle/gradle-daemon-jvm.properties}; \path{gradle.properties}; \path{.gitignore}.
+\end{description}
+}
+
+\end{document}
