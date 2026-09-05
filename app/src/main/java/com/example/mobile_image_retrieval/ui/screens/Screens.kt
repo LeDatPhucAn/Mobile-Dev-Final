@@ -7,8 +7,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -18,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -63,6 +67,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -106,8 +111,6 @@ fun SearchHomeScreen(
     onModeChanged: (SearchMode) -> Unit = {},
     onRefresh: () -> Unit = {},
 ) {
-    val waitingForOcr = state.filters.searchMode == SearchMode.NORMAL &&
-        state.indexingStatus is IndexingStatus.Running && state.ocrIndexingStatus is IndexingStatus.Running
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         uri?.let { onSelectImage(it.toString()) }
     }
@@ -120,12 +123,16 @@ fun SearchHomeScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item {
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                IconButton(onClick = {}) { Icon(Icons.Default.Menu, "Menu") }
-                IconButton(onClick = {}) { Icon(Icons.Default.History, "Search history") }
-            }
-            Text("Photo Search", fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Text("Photo Search", fontSize = 30.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 20.dp))
             Text("Search your photos with AI", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (state.isLibraryLoading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        if (state.libraryError != null) item {
+            Text(state.libraryError, color = MaterialTheme.colorScheme.error)
+            TextButton(onClick = onRefresh) { Text("Try loading photos again") }
+        } else if (!state.isLibraryLoading && state.libraryTotal == 0) item {
+            Text("No accessible photos yet. Add photos to this device or update photo access.")
+            TextButton(onClick = onRequestPermission) { Text("Manage photo access") }
         }
         if (state.photoAccess == PhotoAccess.PARTIAL) item {
             Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(14.dp)) {
@@ -182,7 +189,6 @@ fun SearchHomeScreen(
             }
             Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AssistChip(onClick = onOpenFilters, label = { Text(timeRangeLabel(state.filters.timeRange) + "  ▾") })
-                AssistChip(onClick = onOpenFilters, label = { Text((state.filters.mediaType?.let { if (it == MediaType.IMAGE) "Photos" else "Videos" } ?: "All photos") + "  ▾") })
             }
             Button(
                 onClick = { onSearch(state.query) },
@@ -191,17 +197,15 @@ fun SearchHomeScreen(
                 shape = RoundedCornerShape(14.dp),
             ) { Text("Search") }
         }
-        when (val indexing = if (state.filters.searchMode == SearchMode.OCR || waitingForOcr) state.ocrIndexingStatus else state.indexingStatus) {
+        when (val indexing = if (state.filters.searchMode == SearchMode.OCR) state.ocrIndexingStatus else state.indexingStatus) {
             is IndexingStatus.Running -> item {
                 IndexingCard(indexing, when {
-                    waitingForOcr -> "Scanning text before photos and faces"
                     state.filters.searchMode == SearchMode.OCR -> "Scanning text"
                     else -> "Indexing photos and faces"
                 })
-                if (waitingForOcr) Text("Visual indexing is queued. Previously indexed photos remain searchable.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             }
             is IndexingStatus.Unavailable -> item {
-                Surface(color = Color(0xFFFFF5E6), shape = RoundedCornerShape(14.dp)) {
+                Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = RoundedCornerShape(14.dp)) {
                     Column(Modifier.padding(14.dp)) {
                         Text("Search model unavailable", fontWeight = FontWeight.SemiBold)
                         Text(indexing.reason, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -209,10 +213,18 @@ fun SearchHomeScreen(
                 }
             }
             is IndexingStatus.Interrupted -> item {
-                Surface(color = Color(0xFFFFF5E6), shape = RoundedCornerShape(14.dp)) {
+                Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = RoundedCornerShape(14.dp)) {
                     Column(Modifier.padding(14.dp)) {
                         Text("Indexing paused", fontWeight = FontWeight.SemiBold)
                         Text("${indexing.indexed} / ${indexing.total} photos indexed. The next background pass will retry remaining photos.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            is IndexingStatus.Waiting -> item {
+                Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text("Indexing queued", fontWeight = FontWeight.SemiBold)
+                        Text("${indexing.indexed} saved · ${(indexing.total - indexing.indexed).coerceAtLeast(0)} remaining. Android will resume when background work is allowed and the battery is not low.", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -220,7 +232,7 @@ fun SearchHomeScreen(
         }
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(if (state.filters.searchMode == SearchMode.OCR || waitingForOcr) "Text saved: ${state.textIndexedCount} / ${state.libraryTotal} photos"
+                Text(if (state.filters.searchMode == SearchMode.OCR) "Text saved: ${state.textIndexedCount} / ${state.libraryTotal} photos"
                     else "Photos indexed: ${state.indexedCount} / ${state.libraryTotal}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                 TextButton(onClick = onRefresh) { Text("Refresh") }
             }
@@ -244,19 +256,18 @@ fun SearchHomeScreen(
         if (state.recentPhotos.isNotEmpty()) {
             item { Text("Your library", fontWeight = FontWeight.SemiBold, fontSize = 18.sp) }
             item {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(4),
-                    modifier = Modifier.fillMaxWidth().height(180.dp),
-                    userScrollEnabled = false,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                    verticalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    items(state.recentPhotos.take(8), key = { it.mediaId }) { photo ->
-                        PhotoThumbnail(
-                            photo.uri,
-                            Modifier.clickable { onPhoto(photo.mediaId) },
-                            photo.displayName,
-                        )
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    state.recentPhotos.take(8).chunked(4).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        row.forEach { photo ->
+                            PhotoThumbnail(
+                                photo.uri,
+                                Modifier.weight(1f).clickable { onPhoto(photo.mediaId) },
+                                photo.displayName,
+                            )
+                        }
+                        repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
                     }
                 }
             }
@@ -267,13 +278,18 @@ fun SearchHomeScreen(
 
 @Composable
 internal fun PermissionScreen(onRequestPermission: () -> Unit) {
-    Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(28.dp), contentAlignment = Alignment.Center) {
         ElevatedCard(shape = RoundedCornerShape(24.dp)) {
             Column(Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Icon(Icons.Default.PhotoLibrary, null, Modifier.size(52.dp), tint = MaterialTheme.colorScheme.primary)
                 Text("Search your own photo library", fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 Text("Your photos and searches stay on this device. Semantic search does not require photos to be uploaded.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Button(onClick = onRequestPermission, modifier = Modifier.fillMaxWidth()) { Text("Choose photo access") }
+                TextButton(onClick = {
+                    context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        android.net.Uri.parse("package:${context.packageName}")))
+                }) { Text("Open app settings") }
             }
         }
     }
@@ -328,6 +344,7 @@ fun ResultsScreen(
     onOpenFilters: () -> Unit,
     onClearFilters: () -> Unit,
     onPhoto: (Long) -> Unit,
+    onSearchAgain: () -> Unit = {},
 ) {
     Scaffold(topBar = {
         TopAppBar(
@@ -336,44 +353,55 @@ fun ResultsScreen(
             actions = { IconButton(onClick = onOpenFilters) { Icon(Icons.Default.FilterList, "Filters") } },
         )
     }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
-            Text(state.resultQuery.ifBlank { "Similar photos" }, fontSize = 25.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp))
-            state.resultImageUri?.let { uri ->
-                Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    PhotoThumbnail(uri, Modifier.size(52.dp), "Search reference")
-                    Text("Image similarity search", Modifier.padding(start = 12.dp))
-                }
-            }
-            Text("${state.results.size} results", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(8.dp))
-            if (state.filters.searchMode != SearchMode.NORMAL && state.textIndexedCount < state.libraryTotal) {
-                Text("Text scanning: ${state.textIndexedCount} / ${state.libraryTotal} photos. Results may be incomplete.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(8.dp))
-            }
-            if (state.resultQuery.contains('@') && state.faceIndexedCount < state.libraryTotal) {
-                Text("Face indexing: ${state.faceIndexedCount} / ${state.libraryTotal} photos. Results may be incomplete.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(8.dp))
-            }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                AssistChip(onClick = onOpenFilters, label = { Text(timeRangeLabel(state.filters.timeRange) + "  ▾") })
-                if (state.filters != SearchFilters(searchMode = state.filters.searchMode)) TextButton(onClick = onClearFilters) { Text("Clear") }
-            }
-            if (state.results.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.Search, null, Modifier.size(42.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("No matches in the indexed photos", modifier = Modifier.padding(top = 12.dp))
-                        Text("Try a broader phrase or different filters.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
+            val headerMaxHeight = maxHeight * 0.55f
+            Column(Modifier.fillMaxSize()) {
+                Column(Modifier.heightIn(max = headerMaxHeight).verticalScroll(rememberScrollState())) {
+                    Text(state.resultQuery.ifBlank { "Similar photos" }, fontSize = 25.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 8.dp))
+                    state.resultImageUri?.let { uri ->
+                        Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            PhotoThumbnail(uri, Modifier.size(52.dp), "Search reference")
+                            Text("Image similarity search", Modifier.padding(start = 12.dp))
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (state.results.size == 100) "Top 100 results" else "${state.results.size} results", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f).padding(8.dp))
+                        TextButton(onClick = onSearchAgain) { Text("Search again") }
+                    }
+                    if (state.filters.searchMode == SearchMode.NORMAL && state.indexedCount < state.libraryTotal) {
+                        Text("Photo indexing: ${state.indexedCount} / ${state.libraryTotal}. Search again as more photos become ready.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(8.dp))
+                    }
+                    if (state.filters.searchMode != SearchMode.NORMAL && state.textIndexedCount < state.libraryTotal) {
+                        Text("Text scanning: ${state.textIndexedCount} / ${state.libraryTotal} photos. Results may be incomplete.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(8.dp))
+                    }
+                    if (state.resultQuery.contains('@') && state.faceIndexedCount < state.libraryTotal) {
+                        Text("Face indexing: ${state.faceIndexedCount} / ${state.libraryTotal} photos. Results may be incomplete.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(8.dp))
+                    }
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        AssistChip(onClick = onOpenFilters, label = { Text(timeRangeLabel(state.filters.timeRange) + "  ▾") })
+                        if (state.filters != SearchFilters(searchMode = state.filters.searchMode)) TextButton(onClick = onClearFilters) { Text("Clear") }
                     }
                 }
-            } else LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-                items(state.results, key = { it.media.mediaId }) { result ->
-                    Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(4.dp)).clickable { onPhoto(result.media.mediaId) }) {
-                        AsyncImage(result.media.uri, result.media.displayName, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                        if (result.textMatch) Surface(Modifier.align(Alignment.BottomStart), color = MaterialTheme.colorScheme.primaryContainer) {
-                            Text("Text match", Modifier.padding(4.dp), style = MaterialTheme.typography.labelSmall)
+                if (state.results.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.Search, null, Modifier.size(42.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("No matches in the indexed photos", modifier = Modifier.padding(top = 12.dp))
+                            Text("Try a broader phrase or different filters.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                } else LazyVerticalGrid(
+                    columns = GridCells.Adaptive(110.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    items(state.results, key = { it.media.mediaId }) { result ->
+                        Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(4.dp)).clickable { onPhoto(result.media.mediaId) }) {
+                            AsyncImage(result.media.uri, result.media.displayName, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                            if (result.textMatch) Surface(Modifier.align(Alignment.BottomStart), color = MaterialTheme.colorScheme.primaryContainer) {
+                                Text("Text match", Modifier.padding(4.dp), style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                     }
                 }
@@ -384,8 +412,8 @@ fun ResultsScreen(
 
 @Composable
 fun FiltersScreen(initial: SearchFilters, onClose: () -> Unit, onApply: (SearchFilters) -> Unit) {
-    var filters by remember(initial) { mutableStateOf(initial) }
-    var showRangePicker by remember { mutableStateOf(false) }
+    var filters by rememberSaveable(initial) { mutableStateOf(initial) }
+    var showRangePicker by rememberSaveable { mutableStateOf(false) }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -399,14 +427,14 @@ fun FiltersScreen(initial: SearchFilters, onClose: () -> Unit, onApply: (SearchF
         LazyColumn(Modifier.padding(padding).padding(horizontal = 20.dp)) {
             item { SectionTitle("TIME RANGE") }
             items(TimeRange.entries) { range -> SelectionRow(timeRangeLabel(range), filters.timeRange == range) {
-                filters = filters.copy(timeRange = range)
-                if (range == TimeRange.CUSTOM) showRangePicker = true
+                if (range == TimeRange.CUSTOM) showRangePicker = true else filters = filters.copy(timeRange = range)
             } }
+            if (filters.timeRange == TimeRange.CUSTOM && filters.customStartMillis != null && filters.customEndExclusiveMillis != null) item {
+                val zone = java.time.ZoneId.systemDefault()
+                Text("${Instant.ofEpochMilli(filters.customStartMillis!!).atZone(zone).toLocalDate()} — ${Instant.ofEpochMilli(filters.customEndExclusiveMillis!! - 1).atZone(zone).toLocalDate()}")
+            }
             item { HorizontalDivider(Modifier.padding(vertical = 14.dp)); SectionTitle("SORT BY") }
             items(ResultSort.entries) { sort -> SelectionRow(sortLabel(sort), filters.sort == sort) { filters = filters.copy(sort = sort) } }
-            item { HorizontalDivider(Modifier.padding(vertical = 14.dp)); SectionTitle("MEDIA TYPE") }
-            item { SelectionRow("All", filters.mediaType == null) { filters = filters.copy(mediaType = null) } }
-            items(MediaType.entries) { type -> SelectionRow(if (type == MediaType.IMAGE) "Photos" else "Videos", filters.mediaType == type) { filters = filters.copy(mediaType = type) } }
             item { Spacer(Modifier.height(90.dp)) }
         }
     }
@@ -440,7 +468,7 @@ private fun CustomRangeDialog(onDismiss: () -> Unit, onRange: (Long, Long) -> Un
 
 @Composable
 private fun SelectionRow(label: String, selected: Boolean, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f))
         RadioButton(selected, onClick)
     }

@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -59,6 +61,7 @@ fun PeopleScreen(
     var name by rememberSaveable { mutableStateOf("") }
     var saveVersion by rememberSaveable { mutableLongStateOf(state.personSaveVersion) }
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var removingId by rememberSaveable { mutableStateOf<Long?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
             photoUri = uri.toString()
@@ -118,7 +121,7 @@ fun PeopleScreen(
                                 picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                             }, enabled = !state.isSavingPerson) { Text(if (ready) "Change face photo" else "Update face") }
                         }
-                        IconButton(onClick = { onRemove(person.id) }) {
+                        IconButton(onClick = { removingId = person.id }, enabled = !state.isSavingPerson) {
                             Icon(Icons.Default.Delete, "Remove ${person.name}")
                         }
                     }
@@ -133,7 +136,7 @@ fun PeopleScreen(
             onDismissRequest = { if (!state.isSavingPerson) photoUri = null },
             title = { Text("Save person") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     AsyncImage(uri, "Selected reference photo", Modifier.size(120.dp), contentScale = ContentScale.Crop)
                     VietnameseTextField(
                         value = name,
@@ -164,6 +167,15 @@ fun PeopleScreen(
             dismissButton = {
                 TextButton(onClick = { photoUri = null }, enabled = !state.isSavingPerson) { Text("Cancel") }
             },
+        )
+    }
+    state.people.firstOrNull { it.id == removingId }?.let { person ->
+        AlertDialog(
+            onDismissRequest = { removingId = null },
+            title = { Text("Remove ${person.name}?") },
+            text = { Text("Their saved face and @${person.handle} will be removed. Device photos are kept.") },
+            confirmButton = { TextButton(onClick = { onRemove(person.id); removingId = null }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { removingId = null }) { Text("Cancel") } },
         )
     }
 }

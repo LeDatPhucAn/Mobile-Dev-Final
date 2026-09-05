@@ -55,7 +55,7 @@ class MediaStoreRepository(private val resolver: ContentResolver) {
         val cursor = resolver.query(
             collection,
             projection,
-            null,
+            "${MediaStore.Images.Media.IS_PENDING} = 0",
             null,
             "${MediaStore.Images.Media.DATE_TAKEN} DESC, ${MediaStore.Images.Media.DATE_ADDED} DESC",
         ) ?: throw IOException("The photo library could not be read. Please try refreshing it.")

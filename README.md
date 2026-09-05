@@ -2,6 +2,9 @@
 
 Private, on-device semantic search over the user's Android photo library. The app is Kotlin/Jetpack Compose, targets Android 10+ (`minSdk 29`), never uploads media, and does not request `INTERNET` permission.
 
+See [course requirement mapping and demonstration](COURSE_REQUIREMENTS.md) for screen connections,
+persistence evidence, device integration and an assessment walkthrough.
+
 ## Vietnamese input and OCR
 
 Search and saved-person fields preserve keyboard composition for Vietnamese Telex/VNI input
@@ -21,12 +24,13 @@ The bundled ML Kit Latin OCR model supports Vietnamese and is available offline 
 see [OCR model details](app/src/main/assets/models/OCR_MODELS.md). It is packaged by its Android
 dependency, so no additional manual model download is required.
 
-Library indexing scans OCR first, then performs pending CLIP and face inference. OCR results
-are searchable as soon as each photo is scanned, even before its visual embedding exists.
+Library indexing performs pending OCR, CLIP and face inference for each photo before moving
+to the next photo. Both search tabs become usable incrementally; visual search does not wait
+for an entire library-wide OCR pass. OCR results are searchable even before a visual embedding exists.
 The two tabs report separate progress. Unchanged text scans (including empty detections) are
 reused. The first full-library scan still decodes up to 2048 pixels per photo to retain small print;
 image decoding and text-recognition timings are logged separately under `PhotoTextIndex`.
-Normal indexing follows the OCR pass; this prioritizes making bill/message search ready first. **Refresh**
+Queued work is distinguished from running work using WorkManager's actual state. **Refresh**
 retries pending photos. Opening the text reader can also recognize a photo on demand.
 
 Room schema 4 adds `photo_text` (original text, folded text, modification/model version and empty
@@ -36,6 +40,25 @@ existing tables. Removing/replacing a photo cascades its OCR data. Existing peop
 image vectors and history survive migration; history remembers the search tab, including legacy
 mode names. Rows with `embeddingDimension = 0` hold metadata pending visual indexing and are
 excluded from normal search/counts. Filling an embedding preserves OCR for the same photo revision.
+
+## Saving a found photo
+
+Open a photo from search results, the library, or an album and tap **Save a copy**.
+The app streams the accessible original into `Pictures/Photo Search` without recompressing it,
+publishes it only after the write finishes, and removes an incomplete copy if saving fails.
+The original is retained. **View** in the success message opens the new copy in **Recently Added**,
+which sorts by addition time (newest first), even when the copied photo has an old capture date.
+Saving is disabled while a copy is in progress. The new photo joins ordinary incremental indexing.
+
+The viewer supports pinch/pan, double-tap zoom and Reset zoom. In landscape, the image and
+scrollable actions are side by side. Photo grids adapt their column count to available width;
+the app follows the system's light/dark theme. Failed image loads provide a retry action.
+
+Search drafts and filter edits survive saved-state recreation. Search navigation is acknowledged
+through ViewModel state, so a result arriving during rotation is retained. After process death,
+transient result/search screens return to the restored draft; saved indexes, people and history
+remain in Room. Applying filters from Home edits the next query, while applying from Results
+reruns that search. A cancelled custom-date dialog leaves the previous filter intact.
 
 ## Architecture
 
@@ -81,6 +104,11 @@ flowchart TD
 - deleted: remove its Room row.
 
 The worker persists each successful item immediately, so process death does not discard earlier work. One worker handles the controlled sequence; there is no task or coroutine per photo. A bad thumbnail is logged and skipped without terminating the library pass. WorkManager uses a battery-not-low constraint but does not require charging or networking.
+
+OCR and face cache writes check the parent photo revision transactionally. Older visual work
+cannot replace a newer indexed revision. A final MediaStore snapshot schedules another incremental
+pass if the library changed during indexing. CLIP sessions use two inference threads to limit CPU
+contention with the UI and foreground searches.
 
 Semantic indexing uses `ContentResolver.loadThumbnail(uri, Size(256, 256), ...)`. Face indexing separately decodes an EXIF-oriented version of the original with a longest side of at most 1280 pixels, preserving the full frame, and runs a 640×640 detector followed by sequential 112×112 face recognition. Each bitmap is recycled before continuing to the next photo. Photos with no faces receive a completion marker so they are not reprocessed on every pass. Face rows and completion markers are replaced atomically and cascade away when the parent photo is removed or replaced.
 
@@ -146,6 +174,11 @@ The bundled `det_500m.onnx` and `w600k_mbf.onnx` total approximately 16.1 MB. Se
 
 Both encoders are L2-normalized. Cosine similarity therefore becomes an allocation-free inner-loop dot product. Search reads Room candidates in pages of 512 and maintains a bounded min-heap, avoiding a full result sort and avoiding loading every embedding object at once. The implementation is isolated behind `SearchCandidateSource`, so another local index could replace it later if profiling warrants it; no HNSW or vector server is included now.
 
+Equal relevance uses photo date and ID for deterministic ordering. Normal query returns the best
+100 visual matches, with date sorting applied within those matches. OCR date sorting selects the
+correct oldest/newest 100 from all text matches. OCR reads omit image-vector bytes, and an empty
+text-match set skips the candidate scan entirely. **Search again** refreshes results as indexing advances.
+
 `MediaEmbeddingEntity` stores MediaStore ID, `content://` URI, media type, display metadata, dates, dimensions, bucket data, a Float32 byte array, dimension, and indexing time. It never stores image bytes or filesystem paths. A 512-D vector costs 2,048 bytes, or roughly 20 MB for 10,000 photos before database overhead. `EmbeddingCodec` is the single point for a future explicit FP16 migration.
 
 Search history is another Room table. Insertions trim it to the latest 100 rows; production contains no seeded history. The match percentage shown in detail is a UI-normalized relevance indicator derived from raw cosine similarity. Raw similarity remains stored in `SearchResult`; the percentage is not confidence or probability.
@@ -157,7 +190,7 @@ Search history is another Room table. Insertions trim it to the latest 100 rows;
 - Android 10–12L: requests `READ_EXTERNAL_STORAGE`.
 - Video permission is not requested because v1 indexes images only.
 
-Denied, partial, and revoked access are handled in UI. Delete uses the MediaStore system confirmation flow where required. The app contains no ads, analytics, telemetry, cloud inference, remote database, or `INTERNET` permission. Android backup is disabled for the local index and search history.
+Denied, partial, and revoked access are handled in UI. Delete uses the MediaStore system confirmation flow where required. The app performs inference and stores its index locally, does not request `INTERNET` permission, and does not upload photos or searches. Android backup is disabled for the local index and search history.
 
 Albums load directly from MediaStore independently of semantic indexing. The library refreshes on resume, when opening Albums, and when MediaStore reports changes while the app is visible. Albums distinguish loading, read failures, and an empty library, with refresh and photo-access controls. Partial access can be expanded from either the search or album screen.
 

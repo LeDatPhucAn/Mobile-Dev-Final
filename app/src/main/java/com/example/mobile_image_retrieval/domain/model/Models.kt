@@ -15,7 +15,7 @@ data class MediaItem(
     val mimeType: String?,
     val bucketId: String?,
     val bucketName: String?,
-)
+) : java.io.Serializable
 
 enum class TimeRange { ANY_TIME, TODAY, YESTERDAY, THIS_WEEK, THIS_MONTH, CUSTOM }
 enum class ResultSort { MOST_RELEVANT, NEWEST_FIRST, OLDEST_FIRST }
@@ -35,7 +35,7 @@ data class SearchFilters(
     val customStartMillis: Long? = null,
     val customEndExclusiveMillis: Long? = null,
     val searchMode: SearchMode = SearchMode.NORMAL,
-)
+) : java.io.Serializable
 
 data class SearchResult(val media: MediaItem, val rawSimilarity: Float, val textMatch: Boolean = false)
 
@@ -50,6 +50,7 @@ data class Album(
 sealed interface IndexingStatus {
     data object Idle : IndexingStatus
     data class Running(val indexed: Int, val total: Int) : IndexingStatus
+    data class Waiting(val indexed: Int, val total: Int) : IndexingStatus
     data class Interrupted(val indexed: Int, val total: Int) : IndexingStatus
     data class Unavailable(val reason: String) : IndexingStatus
 }

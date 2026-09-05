@@ -39,9 +39,20 @@ class SemanticSearchEngine(private val source: SearchCandidateSource, private va
         require(queryEmbedding?.isNotEmpty() == true || people.isNotEmpty() || filters.searchMode == SearchMode.OCR)
         require(people.isEmpty() || faceSource != null) { "Face search is unavailable." }
         if (limit <= 0) return emptyList()
+        if (filters.searchMode == SearchMode.OCR && textMatches.isEmpty()) return emptyList()
         val query = queryEmbedding?.copyOf()?.let(VectorMath::l2NormalizeInPlace)
         val normalizedPeople = people.map { VectorMath.l2NormalizeInPlace(it.copyOf()) }
-        val ranking = compareBy<SearchResult> { it.textMatch }.thenBy { it.rawSimilarity }
+        val relevance = compareBy<SearchResult> { it.textMatch }.thenBy { it.rawSimilarity }
+            .thenBy { it.media.dateTaken ?: (it.media.dateAdded ?: 0L) * 1000 }
+            .thenBy { it.media.mediaId }
+        val newest = compareBy<SearchResult> { it.media.dateTaken ?: (it.media.dateAdded ?: 0L) * 1000 }
+            .thenBy { it.media.mediaId }
+        // OCR is an exact set of matches: apply chronological ordering before limiting it.
+        val ranking = if (filters.searchMode == SearchMode.OCR) when (filters.sort) {
+            ResultSort.NEWEST_FIRST -> newest
+            ResultSort.OLDEST_FIRST -> newest.reversed()
+            ResultSort.MOST_RELEVANT -> relevance
+        } else relevance
         val heap = PriorityQueue<SearchResult>(ranking)
         var offset = 0
         val pageSize = 512
@@ -71,8 +82,8 @@ class SemanticSearchEngine(private val source: SearchCandidateSource, private va
         val results = heap.toMutableList()
         when (filters.sort) {
             ResultSort.MOST_RELEVANT -> results.sortWith(ranking.reversed())
-            ResultSort.NEWEST_FIRST -> results.sortByDescending { it.media.dateTaken ?: (it.media.dateAdded ?: 0L) * 1000 }
-            ResultSort.OLDEST_FIRST -> results.sortBy { it.media.dateTaken ?: (it.media.dateAdded ?: 0L) * 1000 }
+            ResultSort.NEWEST_FIRST -> results.sortWith(newest.reversed())
+            ResultSort.OLDEST_FIRST -> results.sortWith(newest)
         }
         return results
     }

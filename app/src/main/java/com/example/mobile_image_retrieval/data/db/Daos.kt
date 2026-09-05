@@ -16,6 +16,7 @@ interface MediaEmbeddingDao {
     @Transaction
     suspend fun upsert(entity: MediaEmbeddingEntity) {
         // Filling an embedding must retain already scanned OCR/faces for this photo revision.
+        if ((byId(entity.mediaId)?.dateModified ?: Long.MIN_VALUE) > entity.dateModified) return
         deleteChanged(entity.mediaId, entity.dateModified)
         write(entity)
     }
@@ -52,7 +53,8 @@ interface MediaEmbeddingDao {
     @Query(
         """
         SELECT mediaId, uri, mediaType, displayName, dateTaken, dateAdded, dateModified,
-               width, height, mimeType, bucketId, bucketName, embedding, embeddingDimension
+               width, height, mimeType, bucketId, bucketName,
+               CASE WHEN :includeMetadata THEN X'' ELSE embedding END AS embedding, embeddingDimension
         FROM media_embeddings
         WHERE (:startMillis IS NULL OR COALESCE(dateTaken, dateAdded * 1000) >= :startMillis)
           AND (:endExclusiveMillis IS NULL OR COALESCE(dateTaken, dateAdded * 1000) < :endExclusiveMillis)
@@ -125,6 +127,9 @@ interface PersonDao {
 
 @Dao
 interface FaceEmbeddingDao {
+    @Query("SELECT dateModified FROM media_embeddings WHERE mediaId = :id")
+    suspend fun parentRevision(id: Long): Long?
+
     @Query("SELECT * FROM face_index")
     suspend fun indexStates(): List<FaceIndexEntity>
 
@@ -146,6 +151,7 @@ interface FaceEmbeddingDao {
     @Transaction
     suspend fun replace(state: FaceIndexEntity, faces: List<FaceEmbeddingEntity>) {
         require(faces.all { it.mediaId == state.mediaId })
+        if (parentRevision(state.mediaId) != state.dateModified) return
         deleteFaces(state.mediaId)
         insertFaces(faces)
         writeState(state) // Empty detections also mark the photo as processed.

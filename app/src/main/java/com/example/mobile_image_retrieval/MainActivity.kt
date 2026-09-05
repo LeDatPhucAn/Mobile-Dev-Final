@@ -31,6 +31,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -55,6 +56,7 @@ import com.example.mobile_image_retrieval.ui.screens.PhotoTextScreen
 import com.example.mobile_image_retrieval.permissions.PhotoPermission
 import com.example.mobile_image_retrieval.permissions.PhotoAccess
 import com.example.mobile_image_retrieval.ui.SearchEvent
+import com.example.mobile_image_retrieval.ui.SearchNavigation
 import com.example.mobile_image_retrieval.ui.SearchViewModel
 import com.example.mobile_image_retrieval.ui.screens.AlbumPhotosScreen
 import com.example.mobile_image_retrieval.ui.screens.AlbumsScreen
@@ -68,6 +70,8 @@ import com.example.mobile_image_retrieval.ui.theme.PhotoSearchTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -134,13 +138,39 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
             when (event) {
-                SearchEvent.Searching -> navController.navigate(Route.SEARCHING)
-                SearchEvent.ResultsReady -> navController.navigate(Route.RESULTS) { popUpTo(Route.SEARCHING) { inclusive = true } }
-                is SearchEvent.Failed -> {
-                    if (navController.currentDestination?.route == Route.SEARCHING) navController.popBackStack()
-                    snackbar.showSnackbar(event.message)
+                is SearchEvent.CopySaved -> scope.launch {
+                    val result = snackbar.showSnackbar("Copy saved to Pictures/Photo Search", actionLabel = "View")
+                    if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+                        navController.navigate(Route.albumViewer(AlbumCatalog.RECENTLY_ADDED_ID, android.content.ContentUris.parseId(event.uri.toUri())))
+                    }
                 }
+                is SearchEvent.CopyFailed -> scope.launch { snackbar.showSnackbar(event.message) }
             }
+        }
+    }
+    // Navigation stays in state until handled, including a search finishing during rotation.
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            viewModel.state.map { it.navigation }.distinctUntilChanged().collect { destination ->
+                when (destination) {
+                    SearchNavigation.SEARCHING -> navController.navigate(Route.SEARCHING) { launchSingleTop = true }
+                    SearchNavigation.RESULTS -> navController.navigate(Route.RESULTS) {
+                        popUpTo(Route.HOME)
+                        launchSingleTop = true
+                    }
+                    SearchNavigation.BACK -> if (navController.currentDestination?.route == Route.SEARCHING) navController.popBackStack()
+                    null -> Unit
+                }
+                if (destination != null) viewModel.consumeNavigation()
+            }
+        }
+    }
+    LaunchedEffect(currentRoute) {
+        val current = viewModel.state.value
+        if (current.navigation == null && !current.isSearching && !current.hasCompletedSearch &&
+            currentRoute in listOf(Route.SEARCHING, Route.RESULTS, Route.RESULT_VIEWER)) {
+            // After process recreation the draft is restored; an old transient screen cannot resume its job.
+            navController.popBackStack(Route.HOME, false)
         }
     }
     LaunchedEffect(state.error) {
@@ -156,14 +186,14 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
         }
     }
 
-    var pendingDelete by remember { mutableStateOf<MediaItem?>(null) }
+    var pendingDelete by rememberSaveable { mutableStateOf<MediaItem?>(null) }
     val deleteConfirmation = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         val item = pendingDelete
         if (result.resultCode == Activity.RESULT_OK && item != null) {
             scope.launch {
                 val deletionSucceeded = if (Build.VERSION.SDK_INT == 29) {
                     withContext(Dispatchers.IO) {
-                        runCatching { context.contentResolver.delete(item.uri.toUri(), null, null) }.isSuccess
+                        runCatching { context.contentResolver.delete(item.uri.toUri(), null, null) > 0 }.getOrDefault(false)
                     }
                 } else {
                     true
@@ -191,7 +221,9 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
         } else {
             scope.launch {
                 try {
-                    withContext(Dispatchers.IO) { context.contentResolver.delete(item.uri.toUri(), null, null) }
+                    val deleted = withContext(Dispatchers.IO) { context.contentResolver.delete(item.uri.toUri(), null, null) }
+                    check(deleted > 0) { "This photo could not be deleted." }
+                    pendingDelete = null
                     viewModel.removeIndexedMedia(item.mediaId)
                     navController.popBackStack()
                 } catch (recoverable: RecoverableSecurityException) {
@@ -271,12 +303,14 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                 ResultsScreen(
                     state, { navController.popBackStack(Route.HOME, false) }, { navController.navigate(Route.FILTERS) },
                     { viewModel.applyFilters(SearchFilters(searchMode = state.filters.searchMode)) }, { navController.navigate(Route.resultViewer(it)) },
+                    onSearchAgain = { viewModel.submitSearch(state.resultQuery, state.filters, state.resultImageUri) },
                 )
             }
             composable(Route.FILTERS) {
                 FiltersScreen(state.filters, { navController.popBackStack() }) { filters ->
+                    val fromResults = navController.previousBackStackEntry?.destination?.route == Route.RESULTS
                     navController.popBackStack()
-                    viewModel.applyFilters(filters)
+                    viewModel.applyFilters(filters, rerun = fromResults)
                 }
             }
             composable(Route.ALBUMS) {
@@ -331,6 +365,8 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                     scoreFor = { mediaId -> if (state.filters.searchMode == SearchMode.OCR) null else state.results.firstOrNull { it.media.mediaId == mediaId }?.rawSimilarity },
                     onFindSimilar = { viewModel.submitSearch("", state.filters.copy(searchMode = SearchMode.NORMAL), imageUri = it.uri) },
                     onReadText = { navController.navigate(Route.photoText(it.mediaId)) },
+                    onSaveCopy = viewModel::savePhotoCopy,
+                    savingCopyMediaId = state.savingCopyMediaId,
                 )
             }
             composable(Route.LIBRARY_VIEWER, arguments = listOf(navArgument("mediaId") { type = NavType.LongType })) { entry ->
@@ -342,6 +378,8 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                     onDelete = ::requestDelete,
                     onFindSimilar = { viewModel.submitSearch("", state.filters.copy(searchMode = SearchMode.NORMAL), imageUri = it.uri) },
                     onReadText = { navController.navigate(Route.photoText(it.mediaId)) },
+                    onSaveCopy = viewModel::savePhotoCopy,
+                    savingCopyMediaId = state.savingCopyMediaId,
                 )
             }
             composable(
@@ -364,6 +402,8 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                     onDelete = ::requestDelete,
                     onFindSimilar = { viewModel.submitSearch("", state.filters.copy(searchMode = SearchMode.NORMAL), imageUri = it.uri) },
                     onReadText = { navController.navigate(Route.photoText(it.mediaId)) },
+                    onSaveCopy = viewModel::savePhotoCopy,
+                    savingCopyMediaId = state.savingCopyMediaId,
                 )
             }
         }

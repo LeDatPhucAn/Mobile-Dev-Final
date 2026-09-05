@@ -18,6 +18,7 @@ import com.example.mobile_image_retrieval.data.repository.ReferencePhotoReposito
 import com.example.mobile_image_retrieval.worker.PhotoIndexScheduler
 import com.example.mobile_image_retrieval.ai.BundledPhotoTextRecognizer
 import com.example.mobile_image_retrieval.data.repository.PhotoTextRepository
+import com.example.mobile_image_retrieval.data.mediastore.PhotoCopyRepository
 
 class PhotoSearchApplication : Application() {
     val container by lazy { AppContainer(this) }
@@ -31,6 +32,7 @@ class AppContainer(application: Application) {
         "photo-search.db",
     ).addMigrations(PhotoSearchDatabase.MIGRATION_1_2, PhotoSearchDatabase.MIGRATION_2_3, PhotoSearchDatabase.MIGRATION_3_4).build()
     val mediaStoreRepository = MediaStoreRepository(application.contentResolver)
+    val photoCopyRepository = PhotoCopyRepository(application.contentResolver)
     val imageEmbeddingModel = MobileClipImageEncoder(application)
     val textEmbeddingModel = MobileClipTextEncoder(application)
     val faceAnalyzer = OnnxFaceAnalyzer(application)

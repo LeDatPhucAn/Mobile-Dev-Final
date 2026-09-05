@@ -16,40 +16,45 @@ import com.example.mobile_image_retrieval.data.db.EmbeddingCodec
 import com.example.mobile_image_retrieval.data.db.MediaEmbeddingEntity
 import com.example.mobile_image_retrieval.data.db.IndexingStateEntity
 import com.example.mobile_image_retrieval.data.repository.IndexingPlanner
+import com.example.mobile_image_retrieval.permissions.PhotoAccess
+import com.example.mobile_image_retrieval.permissions.PhotoPermission
 
 class PhotoIndexWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
         val container = (applicationContext as PhotoSearchApplication).container
         return try {
+            // Without read permission MediaStore may return an empty/owned-only collection.
+            // That is not evidence that the user's indexed photos were deleted.
+            if (PhotoPermission.access(applicationContext) == PhotoAccess.DENIED) throw SecurityException("Photo permission was revoked")
             val media = container.mediaStoreRepository.queryImages() // newest first
             val dao = container.database.mediaEmbeddingDao()
             val stateDao = container.database.indexingStateDao()
             val plan = IndexingPlanner.create(media, dao.indexStates())
             plan.deletedIds.chunked(500).forEach { dao.deleteIds(it) }
             val semanticIds = plan.toEmbed.map { it.mediaId }.toHashSet()
-            val faceIds = IndexingPlanner.facePending(media, container.database.faceEmbeddingDao().indexStates(), semanticIds).map { it.mediaId }.toSet()
-            // OCR needs only metadata, so it can finish before any CLIP or face inference.
+            val faceIds = IndexingPlanner.facePending(media, container.database.faceEmbeddingDao().indexStates(), emptySet()).map { it.mediaId }.toSet()
+            // Complete each photo across search modes, preserving independent cached stages.
             val textPending = IndexingPlanner.textPending(media, container.database.photoTextDao().indexStates(), emptySet())
+            val textIds = textPending.map { it.mediaId }.toHashSet()
             var textCompleted = media.size - textPending.size
             var textFailed = 0
             stateDao.upsert(indexState(textCompleted, media.size, 0, "RUNNING", id = 2))
-            for (item in textPending) {
-                currentCoroutineContext().ensureActive()
-                try { container.photoTextRepository.read(item) }
-                catch (cancelled: CancellationException) { throw cancelled }
-                catch (error: Exception) { textFailed++; Log.w(TAG, "Text indexing failed for ${item.mediaId}", error) }
-                textCompleted++
-                if (textCompleted % 10 == 0) stateDao.upsert(indexState(textCompleted, media.size, textFailed, "RUNNING", id = 2))
-            }
-            stateDao.upsert(indexState(textCompleted, media.size, textFailed, if (textFailed == 0) "COMPLETE" else "INTERRUPTED", id = 2))
-            val pending = media.filter { it.mediaId in semanticIds || it.mediaId in faceIds }
-            var completed = media.size - pending.size
+            val pending = media.filter { it.mediaId in semanticIds || it.mediaId in faceIds || it.mediaId in textIds }
+            var completed = media.count { it.mediaId !in semanticIds && it.mediaId !in faceIds }
             var failed = 0
+            var modelError: String? = null
             stateDao.upsert(indexState(completed, media.size, failed, "RUNNING"))
             setProgress(progress(completed, media.size))
             for (item in pending) {
                 currentCoroutineContext().ensureActive()
                 if (isStopped) return Result.retry()
+                if (item.mediaId in textIds) {
+                    try { container.photoTextRepository.read(item); textCompleted++ }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (error: Exception) { textFailed++; Log.w(TAG, "Text indexing failed for ${item.mediaId}", error) }
+                    stateDao.upsert(indexState(textCompleted, media.size, textFailed, "RUNNING", id = 2))
+                }
+                if (modelError != null || (item.mediaId !in semanticIds && item.mediaId !in faceIds)) continue
                 val totalStarted = SystemClock.elapsedRealtime()
                 var bitmap: android.graphics.Bitmap? = null
                 try {
@@ -76,8 +81,8 @@ class PhotoIndexWorker(appContext: Context, params: WorkerParameters) : Coroutin
                     bitmap = null
                     if (item.mediaId in faceIds) container.faceIndexRepository.index(item)
                 } catch (error: ModelUnavailableException) {
-                    stateDao.upsert(indexState(completed, media.size, failed, "UNAVAILABLE", error.message))
-                    return Result.failure(Data.Builder().putString(KEY_ERROR, error.message).build())
+                    modelError = error.message ?: "Visual search model is unavailable"
+                    stateDao.upsert(indexState(completed, media.size, failed, "UNAVAILABLE", modelError))
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
@@ -88,9 +93,16 @@ class PhotoIndexWorker(appContext: Context, params: WorkerParameters) : Coroutin
                 }
                 completed++
                 setProgress(progress(completed, media.size))
-                if (completed % 10 == 0) stateDao.upsert(indexState(completed, media.size, failed, "RUNNING"))
+                if (modelError == null) stateDao.upsert(indexState(completed, media.size, failed, "RUNNING"))
             }
-            stateDao.upsert(indexState(completed, media.size, failed, if (failed == 0) "COMPLETE" else "INTERRUPTED"))
+            stateDao.upsert(indexState(textCompleted, media.size, textFailed, if (textFailed == 0) "COMPLETE" else "INTERRUPTED", id = 2))
+            stateDao.upsert(indexState(completed, media.size, failed,
+                if (modelError != null) "UNAVAILABLE" else if (failed == 0) "COMPLETE" else "INTERRUPTED", modelError))
+            // A MediaStore notification can arrive while unique work is already running.
+            // Reconcile another snapshot so additions during this pass are not left unindexed.
+            val latest = container.mediaStoreRepository.queryImages()
+            if (latest.associate { it.mediaId to it.dateModified } != media.associate { it.mediaId to it.dateModified }) return Result.retry()
+            if (modelError != null) return Result.failure(Data.Builder().putString(KEY_ERROR, modelError).build())
             Result.success(progress(media.size, media.size))
         } catch (cancelled: CancellationException) {
             throw cancelled
