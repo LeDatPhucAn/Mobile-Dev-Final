@@ -79,12 +79,12 @@ class MobileClipImageEncoder(private val context: Context) : MobileClipSession(c
         inferenceMutex.withLock {
             val inferenceStarted = SystemClock.elapsedRealtime()
             val ortSession = session()
-            verifyNames(ortSession, config.imageInputName, config.imageOutputName)
+            val outputName = embeddingOutputName(ortSession, config.imageInputName, config.imageOutputName, config.embeddingDimension)
             val imageInfo = ortSession.inputInfo[config.imageInputName]?.info as? TensorInfo
             if (imageInfo?.type != OnnxJavaType.FLOAT) throw ModelInferenceException("Image input must be FLOAT, graph reports ${imageInfo?.type}")
             OnnxTensor.createTensor(environment, FloatBuffer.wrap(prepared.values), prepared.shape).use { tensor ->
                 ortSession.run(mapOf(config.imageInputName to tensor)).use { result ->
-                    outputVector(result, config.imageOutputName, config.embeddingDimension).also {
+                    outputVector(result, outputName, config.embeddingDimension).also {
                         Log.d("MobileCLIP", "image inference: ${SystemClock.elapsedRealtime() - inferenceStarted} ms")
                     }
                 }
@@ -108,12 +108,12 @@ class MobileClipTextEncoder(private val context: Context) : MobileClipSession(co
         inferenceMutex.withLock {
             val inferenceStarted = SystemClock.elapsedRealtime()
             val ortSession = session()
-            verifyNames(ortSession, config.textInputName, config.textOutputName)
+            val outputName = embeddingOutputName(ortSession, config.textInputName, config.textOutputName, config.embeddingDimension)
             val inputs = LinkedHashMap<String, OnnxTensor>()
             try {
                 inputs[config.textInputName] = integerTensor(ortSession, config.textInputName, tokenIds, config.contextLength)
                 ortSession.run(inputs).use { result ->
-                    outputVector(result, config.textOutputName, config.embeddingDimension).also {
+                    outputVector(result, outputName, config.embeddingDimension).also {
                         Log.d("MobileCLIP", "text inference: ${SystemClock.elapsedRealtime() - inferenceStarted} ms")
                     }
                 }
@@ -134,9 +134,16 @@ class MobileClipTextEncoder(private val context: Context) : MobileClipSession(co
     }
 }
 
-private fun verifyNames(session: OrtSession, inputName: String, outputName: String) {
+private fun embeddingOutputName(session: OrtSession, inputName: String, outputName: String, dimension: Int): String {
     if (inputName !in session.inputNames) throw ModelInferenceException("Configured input '$inputName' is absent from the ONNX graph")
-    if (outputName !in session.outputNames) throw ModelInferenceException("Configured output '$outputName' is absent from the ONNX graph")
+    return EmbeddingOutputResolver.resolve(
+        outputName,
+        dimension,
+        session.outputInfo.map { (name, node) ->
+            val info = node.info as? TensorInfo
+            EmbeddingOutputSpec(name, info?.type == OnnxJavaType.FLOAT, info?.shape?.toList().orEmpty())
+        },
+    )
 }
 
 object MobileClipAssets {

@@ -112,7 +112,10 @@ fun SearchHomeScreen(
         }
         if (state.photoAccess == PhotoAccess.PARTIAL) item {
             Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(14.dp)) {
-                Text("Searching only the photos you selected. You can expand access in system settings.", Modifier.padding(14.dp), fontSize = 13.sp)
+                Column(Modifier.padding(14.dp)) {
+                    Text("Searching only the photos you selected.", fontSize = 13.sp)
+                    TextButton(onClick = onRequestPermission) { Text("Manage photo access") }
+                }
             }
         }
         item {
@@ -197,7 +200,7 @@ fun SearchHomeScreen(
 }
 
 @Composable
-private fun PermissionScreen(onRequestPermission: () -> Unit) {
+internal fun PermissionScreen(onRequestPermission: () -> Unit) {
     Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
         ElevatedCard(shape = RoundedCornerShape(24.dp)) {
             Column(Modifier.padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
