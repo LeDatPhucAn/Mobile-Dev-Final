@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -60,6 +61,7 @@ import com.example.mobile_image_retrieval.ui.screens.PhotoViewerScreen
 import com.example.mobile_image_retrieval.ui.screens.ResultsScreen
 import com.example.mobile_image_retrieval.ui.screens.SearchHomeScreen
 import com.example.mobile_image_retrieval.ui.screens.SearchingScreen
+import com.example.mobile_image_retrieval.ui.screens.PeopleScreen
 import com.example.mobile_image_retrieval.ui.theme.PhotoSearchTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -85,6 +87,7 @@ private object Route {
     const val RESULTS = "results"
     const val FILTERS = "filters"
     const val ALBUMS = "albums"
+    const val PEOPLE = "people"
     const val ALBUM = "album/{albumId}"
     const val RESULT_VIEWER = "viewer/results/{mediaId}"
     const val LIBRARY_VIEWER = "viewer/library/{mediaId}"
@@ -219,7 +222,7 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
         }
     }
 
-    val showBottomBar = currentRoute == Route.HOME || currentRoute == Route.ALBUMS
+    val showBottomBar = currentRoute == Route.HOME || currentRoute == Route.ALBUMS || currentRoute == Route.PEOPLE
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
@@ -234,20 +237,29 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                     onClick = { navController.navigate(Route.ALBUMS) { popUpTo(navController.graph.findStartDestination().id); launchSingleTop = true } },
                     icon = { Icon(Icons.Default.Album, null) }, label = { Text("Albums") },
                 )
+                NavigationBarItem(
+                    selected = currentRoute == Route.PEOPLE,
+                    onClick = { navController.navigate(Route.PEOPLE) { popUpTo(navController.graph.findStartDestination().id); launchSingleTop = true } },
+                    icon = { Icon(Icons.Default.People, null) }, label = { Text("People") },
+                )
             }
         },
     ) { outerPadding ->
         NavHost(navController, startDestination = Route.HOME, modifier = Modifier.padding(outerPadding)) {
             composable(Route.HOME) {
                 SearchHomeScreen(
-                    state, viewModel::updateQuery, viewModel::submitSearch,
+                    state, viewModel::updateQuery, { viewModel.submitSearch(it) },
                     { permissionLauncher.launch(PhotoPermission.requestedPermissions()) },
                     viewModel::clearHistory, { navController.navigate(Route.FILTERS) },
                     { navController.navigate(Route.libraryViewer(it)) },
+                    onSelectImage = viewModel::selectSearchImage,
+                    onOpenPeople = { navController.navigate(Route.PEOPLE) { launchSingleTop = true } },
+                    onHistorySearch = { viewModel.submitSearch(it, imageUri = null) },
                 )
             }
             composable(Route.SEARCHING) {
-                SearchingScreen(state.resultQuery, { viewModel.cancelSearch(); navController.popBackStack() }, { viewModel.cancelSearch(); navController.popBackStack() })
+                androidx.activity.compose.BackHandler { viewModel.cancelSearch(); navController.popBackStack() }
+                SearchingScreen(state.resultQuery.ifBlank { "Similar photos" }, { viewModel.cancelSearch(); navController.popBackStack() }, { viewModel.cancelSearch(); navController.popBackStack() })
             }
             composable(Route.RESULTS) {
                 ResultsScreen(
@@ -273,6 +285,16 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                     onRequestPermission = { permissionLauncher.launch(PhotoPermission.requestedPermissions()) },
                 )
             }
+            composable(Route.PEOPLE) {
+                PeopleScreen(
+                    state = state,
+                    onSave = viewModel::savePerson,
+                    onRemove = { viewModel.removePerson(it) },
+                    onSearch = { viewModel.submitSearch(it, imageUri = null) },
+                    onClearSaveError = viewModel::clearPersonSaveError,
+                    onRefresh = { viewModel.refreshLibrary() },
+                )
+            }
             composable(Route.ALBUM, arguments = listOf(navArgument("albumId") { type = NavType.StringType })) { entry ->
                 val albumId = Uri.decode(entry.arguments?.getString("albumId").orEmpty())
                 val album = state.albums.firstOrNull { it.id == albumId }
@@ -296,6 +318,7 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                     onShare = ::share,
                     onDelete = ::requestDelete,
                     scoreFor = { mediaId -> state.results.firstOrNull { it.media.mediaId == mediaId }?.rawSimilarity },
+                    onFindSimilar = { viewModel.submitSearch("", imageUri = it.uri) },
                 )
             }
             composable(Route.LIBRARY_VIEWER, arguments = listOf(navArgument("mediaId") { type = NavType.LongType })) { entry ->
@@ -305,6 +328,7 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                     onBack = { navController.popBackStack() },
                     onShare = ::share,
                     onDelete = ::requestDelete,
+                    onFindSimilar = { viewModel.submitSearch("", imageUri = it.uri) },
                 )
             }
             composable(
@@ -325,6 +349,7 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                     onBack = { navController.popBackStack() },
                     onShare = ::share,
                     onDelete = ::requestDelete,
+                    onFindSimilar = { viewModel.submitSearch("", imageUri = it.uri) },
                 )
             }
         }

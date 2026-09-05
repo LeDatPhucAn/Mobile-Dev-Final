@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -74,6 +73,7 @@ fun PhotoViewerScreen(
     onShare: (MediaItem) -> Unit,
     onDelete: (MediaItem) -> Unit,
     scoreFor: (Long) -> Float? = { null },
+    onFindSimilar: ((MediaItem) -> Unit)? = null,
 ) {
     val initialPage = remember(photos, initialMediaId) {
         photos.indexOfFirst { it.mediaId == initialMediaId }
@@ -157,6 +157,11 @@ fun PhotoViewerScreen(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         ViewerActionButton("Share", Icons.Default.Share, Modifier.weight(1f)) { onShare(media) }
                         ViewerActionButton("Delete", Icons.Default.Delete, Modifier.weight(1f)) { onDelete(media) }
+                    }
+                    onFindSimilar?.let { search ->
+                        TextButton(onClick = { search(media) }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Find similar photos")
+                        }
                     }
                 }
             }

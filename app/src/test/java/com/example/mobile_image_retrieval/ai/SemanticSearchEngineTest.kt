@@ -15,7 +15,17 @@ class SemanticSearchEngineTest {
         EmbeddingCodec.encode(vector), vector.size,
     )
 
-    private fun engine(candidates: List<SearchCandidate>) = SemanticSearchEngine { _, limit, offset -> candidates.drop(offset).take(limit) }
+    private fun engine(candidates: List<SearchCandidate>) = SemanticSearchEngine(SearchCandidateSource { _, limit, offset -> candidates.drop(offset).take(limit) })
+
+    @Test fun `face filtering happens before top k across every page`() = runTest {
+        val candidates = (1L..513L).map { candidate(it, if (it == 513L) floatArrayOf(0f, 1f) else floatArrayOf(1f, 0f)) }
+        val engine = SemanticSearchEngine(
+            SearchCandidateSource { _, limit, offset -> candidates.drop(offset).take(limit) },
+            FaceCandidateSource { ids -> if (513L in ids) mapOf(513L to listOf(floatArrayOf(1f, 0f))) else emptyMap() },
+        )
+        val results = engine.search(floatArrayOf(1f, 0f), SearchFilters(), limit = 1, people = listOf(floatArrayOf(1f, 0f)))
+        assertEquals(listOf(513L), results.map { it.media.mediaId })
+    }
 
     @Test fun `empty index returns empty results`() = runTest { assertTrue(engine(emptyList()).search(floatArrayOf(1f, 0f), SearchFilters()).isEmpty()) }
 
