@@ -2,7 +2,7 @@
 % !TeX options = -synctex=1 -interaction=nonstopmode -halt-on-error -file-line-error -output-directory="%OUTDIR%" "%DOC%"
 % From the repository root: tectonic --outdir docs/build docs/report.tex
 % Or, from docs/, run twice: xelatex -synctex=1 -interaction=nonstopmode -halt-on-error -output-directory=build report.tex
-% Use XeLaTeX, LuaLaTeX, or Tectonic for the Vietnamese Unicode text.
+% Use XeLaTeX, LuaLaTeX, or Tectonic for the Unicode text.
 % Default bundled Latin Modern fonts; no system fonts or fontspec required.
 \documentclass[11pt,a4paper]{article}
 \usepackage[margin=20mm]{geometry}
@@ -80,12 +80,12 @@
 \pdfbookmark[0]{Abstract}{abstract}
 \section*{Abstract}
 
-The growth of personal photo libraries creates a retrieval problem when users remember an image's content but cannot recall its filename, capture date, or album. This project addresses that problem through Mobile Image Retrieval, a native Android application that supports semantic text queries, reference-image queries, explicitly enrolled people, and optical character recognition (OCR). The intended users include individuals managing mixed personal collections and Vietnamese-speaking users retrieving receipts, messages, and screenshots.
+The growth of personal photo libraries creates a retrieval problem when users remember an image's content but cannot recall its filename, capture date, or album. This project addresses that problem through Mobile Image Retrieval, a native Android application that supports semantic text queries, reference-image queries, explicitly enrolled people, and optical character recognition (OCR). The intended users include individuals managing mixed personal collections and users retrieving receipts, messages, and screenshots.
 
-The application combines MobileCLIP2-S0 for visual retrieval, SCRFD and MobileFaceNet for face detection and recognition, and bundled ML Kit text recognition for literal text search. Its architecture separates Jetpack Compose interfaces, ViewModel state management, repository coordination, and persistent storage. Room maintains a local index, while MediaStore supplies access to device photos and WorkManager schedules incremental indexing. Inference is performed on the device; the application manifest excludes network permissions. Vietnamese OCR retrieval supports accent-insensitive matching while preserving the original text for reading and copying.
+The application combines MobileCLIP2-S0 for visual retrieval, SCRFD and MobileFaceNet for face detection and recognition, and bundled ML Kit text recognition for literal text search. Its architecture separates Jetpack Compose interfaces, ViewModel state management, repository coordination, and persistent storage. Room maintains a local index, while MediaStore supplies access to device photos and WorkManager schedules incremental indexing. Inference is performed on the device; the application manifest excludes network permissions.
 
 The implemented system provides eight connected feature screens and supports retrieval, filtering, photo viewing, sharing, saving copies, and deletion through Android media services. The principal limitations concern model size, initialization cost, recognition errors, and the current restriction to image media. 
-\textbf{Keywords:} Android; on-device inference; image retrieval; semantic search; face recognition; Vietnamese OCR; local persistence.
+\textbf{Keywords:} Android; on-device inference; image retrieval; semantic search; face recognition; OCR; local persistence.
 
 
 \subsection*{Report Organization}
@@ -111,7 +111,7 @@ The topic of this project is \textbf{private, on-device image retrieval}: making
 \textbf{Objective} & \textbf{Observable success condition}\\\hline
 Visual content retrieval & A text prompt, reference image, or combined query returns ranked device photos.\\
 Enrolled-person retrieval & A saved handle filters results by face similarity; multiple handles require distinct matching faces.\\
-Text-based image retrieval & OCR search retrieves photos containing specified words or numbers, including Vietnamese text entered without accents.\\
+Text-based image retrieval & OCR search retrieves photos containing specified words or numbers.\\
 Retrieval-to-action workflow & Retrieved photos open in a viewer supporting zoom, sharing, copying, deletion, and text reading.\\
 Persistent application state & Indexed data, saved people, and text-search history are retained across application restarts.\\
 \end{reporttable}
@@ -129,14 +129,14 @@ The principal engineering contribution is the integration of pretrained retrieva
 
 \subsection{Intended Audience}
 
-The primary target group comprises Android users managing heterogeneous personal image collections who require content-based retrieval without comprehensive manual tagging. Vietnamese-speaking students and personal-device users form a relevant secondary group because receipts, messages, and screenshots frequently contain Vietnamese text. English visual descriptions remain the most suitable input for Normal query.
+The primary target group comprises Android users managing heterogeneous personal image collections who require content-based retrieval without comprehensive manual tagging. English visual descriptions remain the most suitable input for Normal query.
 
 The following profiles are capability-based design scenarios. Empirical validation through interviews or usability studies remains outside the available evaluation evidence.
 
 \reporttablecaption{users}{Target User Profiles and Supported Workflows}
 \begin{reporttable}{P{\dimexpr0.2400\linewidth-2\tabcolsep\relax}P{\dimexpr0.3700\linewidth-2\tabcolsep\relax}P{\dimexpr0.3900\linewidth-2\tabcolsep\relax}}
 \textbf{User profile} & \textbf{Need} & \textbf{Supported workflow}\\\hline
-Student & Recover a saved receipt or message screenshot without remembering its date. & OCR search \(\rightarrow\) enter “hóa đơn” or “hoa don” \(\rightarrow\) open result \(\rightarrow\) Read text.\\
+Student & Recover a saved receipt or message screenshot without remembering its date. & OCR search \(\rightarrow\) enter “invoice” \(\rightarrow\) open result \(\rightarrow\) Read text.\\
 Personal photo owner & Find a scene, object, or visually similar image among many photos. & Normal query \(\rightarrow\) enter a description or choose a reference image \(\rightarrow\) browse ranked results.\\
 Family or travel user & Find an enrolled person within a meaningful setting. & People \(\rightarrow\) save one clear face \(\rightarrow\) search “@alex at the beach.”\\
 User with limited connectivity & Browse and search accessible photos without uploading the library. & Install an APK containing the models \(\rightarrow\) grant access \(\rightarrow\) index \(\rightarrow\) search offline.\\
@@ -145,7 +145,7 @@ User with limited connectivity & Browse and search accessible photos without upl
 \subsection{Representative Use Cases}
 
 \begin{enumerate}
-\item \textbf{Recover a document image.} The user selects OCR search and enters words actually visible in a screenshot. The application folds accents for matching, returns matching photos, and preserves the original accented text in the reader. The user copies the required passage.
+\item \textbf{Recover a document image.} The user selects OCR search and enters words actually visible in a screenshot. The application returns matching photos and preserves the original recognized text in the reader. The user copies the required passage.
 \item \textbf{Find a remembered scene.} The user enters “sunset at the beach” in Normal query. After indexing, the application ranks photos by visual similarity. Date filters narrow the candidates, and the viewer exposes share and save-copy actions.
 \item \textbf{Find known people together.} The user enrolls two people separately and searches their handles together. Each person must match a distinct detected face. Adding a visual description further ranks the photos that pass the identity filter.
 \item \textbf{Reuse a found image.} The user opens a result, selects Save a copy, and follows View to the new image in Recently Added. The original photo remains in place.
@@ -166,13 +166,13 @@ The table below proposes a randomized, balanced allocation: each member receives
 \reporttablecaption{contributions}{Work Allocation and Deliverable Status}
 \begin{reporttable}{P{\dimexpr0.2333\linewidth-2\tabcolsep\relax}P{\dimexpr0.2444\linewidth-2\tabcolsep\relax}P{\dimexpr0.5222\linewidth-2\tabcolsep\relax}}
 \textbf{Work package} & \textbf{Member} & \textbf{Deliverable and completion evidence}\\\hline
-Requirements and product scope & Le Dat Phuc An & Requirement mapping, topic, use cases, and demonstration sequence in COURSE\_REQUIREMENTS.md and README. Documentation exists.\\
+Requirements and product scope & Tran Canh Anh Tuan & Requirement mapping, topic, use cases, and demonstration sequence in COURSE\_REQUIREMENTS.md and README. Documentation exists.\\
 Compose UI and navigation & Pham Nguyen Minh Quan & Eight feature screens, adaptive grids, viewer interactions, permission states, saved-state handling. Implemented in MainActivity and ui/.\\
 Data and Android integration & Tran Canh Anh Tuan & Room schema/migrations, MediaStore browsing, history, copying, sharing/deletion integration. Implemented in data/ and MainActivity.\\
 Visual retrieval & Vong Chi Van & Export contract, CLIP preprocessing/tokenization, embeddings, exact top-K, image/text combination. Implemented in ai/ and export tooling.\\
 Face enrollment and search & Vong Chi Van & SCRFD/MobileFaceNet integration, alignment, references, distinct-person matching, versioned caches. Implemented in ai/ and repositories.\\
-Vietnamese OCR & Le Dat Phuc An & Bundled recognition, accent folding, FTS4, text reader, composing-input preservation. Implemented in OCR/data/UI components.\\
-Background indexing & Tran Canh Anh Tuan & Incremental worker, scheduling, and consistency protection. Implemented in worker/ and repositories.\\
+OCR and text retrieval & Le Dat Phuc An & Bundled recognition, FTS4 search, text reader. Implemented in OCR/data/UI components.\\
+Background indexing & Le Dat Phuc An & Incremental worker, scheduling, and consistency protection. Implemented in worker/ and repositories.\\
 Report and presentation & Pham Nguyen Minh Quan & Report source and demonstration protocol prepared. Final artifact review and presentation delivery remain pending.\\
 Testing and validation & All four members (equal share) & Unit and instrumentation tests for retrieval, Room persistence, OCR, indexing, and media operations; build/lint checks and device regression testing. Existing tests and audit results provide the baseline; record new outcomes and defects.\\
 \end{reporttable}
@@ -242,7 +242,7 @@ People & Add, update, and remove face references; use saved handles in a query.\
 Albums & Browse actual MediaStore buckets and system collections independently of AI indexing.\\
 Album contents & Open photos belonging to the selected collection.\\
 Photo viewer & Inspect and zoom; find similar photos, share, save a copy, delete, or read text.\\
-Text reader & View, select, and copy recognized text with its original accents.\\
+Text reader & View, select, and copy the original recognized text.\\
 \end{reporttable}
 
 The viewer has routes for results, the library, and album contexts. Save a copy produces a snackbar with a View action that opens the new media item through Recently Added. “Find similar photos” makes the current photo the next query's image reference.
@@ -311,8 +311,6 @@ Copy in progress or failure & Disable repeat save; show success or error feedbac
 \subsection{Adaptive Layout and Interaction}
 
 Photo grids choose their column count from available width. The viewer supports pinch/pan, double-tap zoom, and resetting zoom. In landscape it places the image beside scrollable actions. The application follows system light/dark appearance, and saved-person removal requires confirmation.
-
-Vietnamese inputs preserve the keyboard's composing region during Telex/VNI entry. Text is normalized on submission rather than rewritten on each keystroke. This matters because prematurely replacing the input text can disrupt accent composition.
 
 \subsection{Lifecycle Continuity}
 
@@ -391,7 +389,7 @@ A media row with \code{embeddingDimension = 0} represents known metadata awaitin
 \textbf{Migration} & \textbf{Preserved or added behavior}\\\hline
 1 \(\rightarrow\) 2 & Add saved people and a unique handle index while retaining existing semantic data and history.\\
 2 \(\rightarrow\) 3 & Add per-photo face state and per-face vectors; mark existing person-reference model types for explicit re-enrollment.\\
-3 \(\rightarrow\) 4 & Add original/folded OCR text, an FTS4 index and synchronization triggers, plus history search-mode storage.\\
+3 \(\rightarrow\) 4 & Add original/normalized OCR text, an FTS4 index and synchronization triggers, plus history search-mode storage.\\
 \end{reporttable}
 
 OCR and face writes compare the current parent revision inside a transaction. An obsolete inference result cannot attach to a newer indexed photo revision. Updating a photo invalidates dependent old data; deleting its parent cascades to its OCR and face records. History insertions retain only the latest 100 text searches. Uninstalling or clearing app data removes this private database.
@@ -464,7 +462,7 @@ For \code{@alex @mai at the beach}, the parser resolves both saved references an
 
 The threshold is an initial, uncalibrated operating point. Pose, lighting, face size, occlusion, and similar-looking people can cause errors. 
 
-\reportsection{Vietnamese OCR and Text Retrieval}
+\reportsection{OCR and Text Retrieval}
 
 \subsection{Recognition and Caching}
 
@@ -474,16 +472,16 @@ PhotoTextRepository decodes an EXIF-oriented, full-frame image with a longest si
 
 Successful scans containing no text are cached. Failures remain eligible for a later pass, and changed photos or model versions invalidate old text. At most 100,000 characters are stored per image, with truncation surfaced in the reader. On-demand reading can recognize a photo that has not yet completed background OCR.
 
-\subsection{Accent-insensitive Word Matching}
+\subsection{Word Matching}
 
-The index decomposes Unicode, removes combining marks, maps \code{đ} to \code{d}, lowercases text, and turns punctuation into word separators. Original text remains available for display and copying. User input is converted to quoted literal terms for the FTS4 query; it is not treated as executable FTS syntax. A query permits at most 64 distinct terms.
+The index normalizes recognized text for word matching, including lowercasing text and turning punctuation into word separators. Original text remains available for display and copying. User input is converted to quoted literal terms for the FTS4 query; it is not treated as executable FTS syntax. A query permits at most 64 distinct terms.
 
 \reporttablecaption{ocr}{OCR Query Semantics and Boundaries}
 \begin{reporttable}{P{\dimexpr0.2800\linewidth-2\tabcolsep\relax}P{\dimexpr0.3500\linewidth-2\tabcolsep\relax}P{\dimexpr0.3700\linewidth-2\tabcolsep\relax}}
 \textbf{Example input} & \textbf{Search interpretation} & \textbf{Boundary}\\\hline
-\code{hóa đơn} or \code{hoa don} & Match the normalized words “hoa” and “don.” & Accents may be omitted; all terms must match.\\
+\code{invoice total} & Match the words “invoice” and “total.” & All terms must match.\\
 \code{70.000} & Match normalized number tokens separated by punctuation. & Does not validate a monetary amount or parse bill fields.\\
-\code{@thảo hóa đơn} & Resolve the saved identity and require the OCR terms. & Requires face indexing and an enrolled matching handle.\\
+\code{@alex invoice} & Resolve the saved identity and require the OCR terms. & Requires face indexing and an enrolled matching handle.\\
 A translated synonym & Match only the entered words after normalization. & No translation, fuzzy spelling, or semantic OCR matching.\\
 \end{reporttable}
 
@@ -491,7 +489,7 @@ A translated synonym & Match only the entered words after normalization. & No tr
 
 OCR search does not invoke the CLIP text encoder, and OCR matches do not influence Normal-query ranking. OCR retrieval uses stored text independently of visual embeddings; background indexing processes OCR last. Candidate reads omit image-vector bytes when OCR does not need them. An empty text-match set returns early.
 
-Date sorting is applied while selecting OCR matches, giving the true oldest/newest 100 across all matching pages. The reader displays original accents and supports selection/copying. Sharp printed text and screenshots are suitable inputs; tiny text, blur, handwriting, and poor contrast can lower recognition quality. Vietnamese text entry and OCR support do not establish Vietnamese semantic understanding by CLIP.
+Date sorting is applied while selecting OCR matches, giving the true oldest/newest 100 across all matching pages. The reader displays the original recognized text and supports selection/copying. Sharp printed text and screenshots are suitable inputs; tiny text, blur, handwriting, and poor contrast can lower recognition quality.
 
 
 \reportsection{Incremental Indexing and Reliability}
@@ -539,7 +537,7 @@ Room / SQLite FTS4 & 2.7.2 & Persistent index, migrations, literal text search.\
 WorkManager & 2.10.3 & Constrained, persistent background indexing.\\
 Coil Compose & 3.3.0 & Loading device media images into Compose.\\
 ONNX Runtime Android & 1.22.0 & Local CLIP and face-model inference.\\
-ML Kit text recognition & 16.0.1 & Bundled offline Latin/Vietnamese OCR.\\
+ML Kit text recognition & 16.0.1 & Bundled offline Latin text recognition.\\
 JUnit / coroutine tests & 4.13.2 / 1.10.2 & Unit assertions and asynchronous test control.\\
 AndroidX JUnit / Espresso & 1.3.0 / 3.7.0 & Android instrumentation support.\\
 \end{reporttable}
@@ -611,7 +609,7 @@ Alternatively, copy the APK to the device and open it with Android's package ins
 \subsection{First-run Procedure}
 \begin{enumerate}
 \item Grant photo access. Android 10--12L uses \code{READ\_EXTERNAL\_STORAGE}; Android 13+ uses \code{READ\_MEDIA\_IMAGES}. Android 14+ also supports selected-photo access through \code{READ\_MEDIA\_VISUAL\_USER\_SELECTED}.
-\item Start with a small accessible set containing a clear scene, a single-face portrait, and a legible Vietnamese screenshot or receipt. Open Albums to confirm actual device photos are visible.
+\item Start with a small accessible set containing a clear scene, a single-face portrait, and a legible screenshot or receipt. Open Albums to confirm actual device photos are visible.
 \item Observe OCR and visual indexing progress. A battery-not-low constraint can leave background work queued. Search completed photos while remaining stages continue.
 \item Try Normal query with an English scene description, OCR search with known visible words, and a saved handle after enrolling a person. Then open a result and use Read text or Save a copy.
 \item Close and reopen the same installation to check retained people, history, and indexing progress. Search and browse in airplane mode after assets are packaged and access is granted.
@@ -651,7 +649,7 @@ Cold visual query & Approximately 8.2 seconds on the evaluated emulator, includi
 The recorded checks establish coverage of specified functional and reliability scenarios. The latency measurement represents a single cold query and does not characterize a distribution or sustained indexing throughput. Statistical retrieval accuracy and cross-device performance require separate evaluation.
 
 \subsection{Test Coverage}
-Unit tests cover vector math, embedding output validation, exact top-K ranking, deterministic ties, OCR date ordering across pages, mention parsing, distinct face assignment, Vietnamese normalization, date bounds, and incremental planning. Instrumentation covers Room migrations/cascades, revision protection, OCR search on metadata-only photo rows, real bundled OCR/CLIP/face inference, copy success/failure cleanup, Vietnamese keyboard composition, filter restoration, and landscape viewer actions.
+Unit tests cover vector math, embedding output validation, exact top-K ranking, deterministic ties, OCR date ordering across pages, mention parsing, distinct face assignment, text normalization, date bounds, and incremental planning. Instrumentation covers Room migrations/cascades, revision protection, OCR search on metadata-only photo rows, real bundled OCR/CLIP/face inference, copy success/failure cleanup, filter restoration, and landscape viewer actions.
 
 \subsection{Supplementary Source and Asset Verification}
 Source inspection counted \textbf{63 unit-test annotations across 13 files} and \textbf{40 instrumentation-test annotations across 13 files}, consistent with the audit's counts. The two CLIP graphs, vocabulary, and merges file were present and their SHA-256 hashes matched the generated configuration. The supplied face inspection script read both ONNX contracts and hashes; those hashes matched FACE\_MODELS.md.
@@ -674,7 +672,7 @@ A capability is classified as implemented when it is supported by an identifiabl
 Functional completeness & 30\% & Implemented: text/image/combined visual search, enrolled people, OCR, filters, albums, viewing, text reading, sharing, deletion, and copying. Audit records successful build and tests. Recognition remains approximate; unsupported videos and album editing are outside reported scope.\\
 Technical quality and source & 25\% & Separated interface, ViewModel, and repository responsibilities; explicit Room migrations; coroutine-based execution; WorkManager scheduling; runtime permissions; and revision checks. Tests address failure and lifecycle scenarios. Physical-device and large-library profiling require further evaluation.\\
 UI and UX & 20\% & Eight connected feature screens; two clear query modes; adaptive grids, light/dark themes, zoom, landscape actions, and distinct loading/empty/error/access states. No formal usability study is supplied.\\
-Originality and complexity & 15\% & Integration of offline cross-modal retrieval, distinct-person matching, Vietnamese OCR/FTS, persistence, and Android media operations using pretrained models. Comparative originality and suitability for the confirmed group size remain subject to assessor review.\\
+Originality and complexity & 15\% & Integration of offline cross-modal retrieval, distinct-person matching, OCR/FTS, persistence, and Android media operations using pretrained models. Comparative originality and suitability for the confirmed group size remain subject to assessor review.\\
 Report, presentation, collaboration & 10\% & Required report subjects, demonstration protocol, and work-division table are documented. Contributor attribution and evidence of video and presentation delivery remain outstanding.\\
 \end{reporttable}
 
@@ -690,7 +688,7 @@ Version 1.0 provides an integrated Android implementation of offline visual, ide
 \subsection{Current Practical Limits}
 Bundling models enables offline first use but produces a large installation artifact. The audit reports a universal debug APK of approximately 502.5 MB. First initialization and full-library indexing can be slow, particularly on an emulator. 
 
-Normal-query visual descriptions work best in English. Vietnamese input handling and OCR improve text entry and literal text retrieval but do not make CLIP a Vietnamese semantic model. OCR can miss small, blurred, handwritten, or poorly contrasted text. Face detection can miss small or obscured faces, and uncalibrated identity matching can produce false matches.
+Normal-query visual descriptions work best in English. OCR can miss small, blurred, handwritten, or poorly contrasted text. Face detection can miss small or obscured faces, and uncalibrated identity matching can produce false matches.
 
 \reporttablecaption{tradeoffs}{Architectural Trade-Offs}
 \begin{reporttable}{P{\dimexpr0.3118\linewidth-2\tabcolsep\relax}P{\dimexpr0.6882\linewidth-2\tabcolsep\relax}}
