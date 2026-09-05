@@ -5,6 +5,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AlbumCatalogTest {
+    @Test fun `newly saved copies lead recently added even with old capture dates`() {
+        val photos = listOf(
+            photo(1, "camera", "Camera", 100).copy(dateTaken = 999_000),
+            photo(2, "copies", "Photo Search", 200).copy(dateTaken = 1),
+            photo(3, "copies", "Photo Search", 200).copy(dateTaken = 1),
+        )
+        assertEquals(listOf(3L, 2L, 1L), AlbumCatalog.photosFor(AlbumCatalog.RECENTLY_ADDED_ID, photos, 300_000).map { it.mediaId })
+    }
     @Test
     fun `album counts and resolved contents use the same rules`() {
         val nowMillis = 2_000_000_000_000L

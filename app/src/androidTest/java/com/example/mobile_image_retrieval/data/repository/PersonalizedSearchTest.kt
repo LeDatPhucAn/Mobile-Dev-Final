@@ -235,7 +235,8 @@ class PersonalizedSearchTest {
             detectionCount = 1
             references.savePerson("Mai Anh", uri, saved.id)
             file.delete()
-            assertEquals(0L, repository.search("@mai_anh", SearchFilters()).results.first().media.mediaId)
+            // Both photos contain this face; equal matches have deterministic date/ID ordering.
+            assertEquals(listOf(2L, 0L), repository.search("@mai_anh", SearchFilters()).results.map { it.media.mediaId })
             assertTrue(embeddedText.isEmpty())
             // Normal query combines the image vector [1,0] and text vector [0,1].
             val replacement = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888)

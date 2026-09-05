@@ -1,0 +1,2 @@
+ It must go beyond a single static screen: expect at least three to four meaningfully connected screens, persistent local data, and integration with an external data source or device capability such as a REST API, camera, location services, or notifications. You are free to use any stack covered in the course (Kotlin/Java with Android SDK, Jetpack Compose, or Flutter/React Native), provided the final product is a native-installable Android app.
+

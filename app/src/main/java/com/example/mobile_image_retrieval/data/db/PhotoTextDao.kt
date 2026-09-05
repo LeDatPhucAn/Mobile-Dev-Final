@@ -3,12 +3,21 @@ package com.example.mobile_image_retrieval.data.db
 import androidx.room.Dao
 import androidx.room.Upsert
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface PhotoTextDao {
     @Upsert
-    suspend fun upsert(document: PhotoTextEntity)
+    suspend fun write(document: PhotoTextEntity)
+
+    @Query("SELECT dateModified FROM media_embeddings WHERE mediaId = :id")
+    suspend fun parentRevision(id: Long): Long?
+
+    @Transaction
+    suspend fun upsert(document: PhotoTextEntity) {
+        if (parentRevision(document.mediaId) == document.dateModified) write(document)
+    }
 
     @Query("SELECT * FROM photo_text WHERE rowid = :mediaId")
     suspend fun byMediaId(mediaId: Long): PhotoTextEntity?

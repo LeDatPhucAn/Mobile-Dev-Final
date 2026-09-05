@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -16,6 +17,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -30,6 +33,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,6 +50,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -75,9 +84,12 @@ fun PhotoViewerScreen(
     scoreFor: (Long) -> Float? = { null },
     onFindSimilar: ((MediaItem) -> Unit)? = null,
     onReadText: ((MediaItem) -> Unit)? = null,
+    onSaveCopy: ((MediaItem) -> Unit)? = null,
+    savingCopyMediaId: Long? = null,
 ) {
-    val initialPage = remember(photos, initialMediaId) {
-        photos.indexOfFirst { it.mediaId == initialMediaId }
+    var selectedMediaId by rememberSaveable(initialMediaId) { mutableStateOf(initialMediaId) }
+    val initialPage = remember(photos, selectedMediaId) {
+        photos.indexOfFirst { it.mediaId == selectedMediaId }
     }
     if (initialPage < 0) {
         UnavailablePhotoScreen(onBack)
@@ -86,7 +98,9 @@ fun PhotoViewerScreen(
 
     val pagerState = rememberPagerState(initialPage = initialPage) { photos.size }
     val media = photos.getOrNull(pagerState.currentPage) ?: photos[initialPage]
+    LaunchedEffect(media.mediaId) { selectedMediaId = media.mediaId }
     val score = scoreFor(media.mediaId)
+    var zoomed by remember(media.mediaId) { mutableStateOf(false) }
 
     Scaffold(
         containerColor = Color.Black,
@@ -107,67 +121,87 @@ fun PhotoViewerScreen(
             )
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                key = { photos[it].mediaId },
-            ) { page ->
-                val pageMedia = photos[page]
-                AsyncImage(
-                    model = pageMedia.uri,
-                    contentDescription = pageMedia.displayName ?: "Photo ${page + 1}",
-                    modifier = Modifier.fillMaxSize().background(Color.Black),
-                    contentScale = ContentScale.Fit,
-                )
-            }
-            Surface(color = Color(0xFF121212), contentColor = Color.White) {
-                Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(9.dp),
-                ) {
-                    Text(
-                        text = media.displayName ?: "Photo",
-                        fontSize = 21.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(formatDate(media.dateTaken ?: media.dateAdded?.times(1000)), color = Color.LightGray)
-                    if (score != null) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Match score", fontWeight = FontWeight.SemiBold)
-                            Text(
-                                "${MatchScoreFormatter.percentage(score)}%",
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                        Text(
-                            "Relevance indicator derived from cosine similarity; not model confidence or probability.",
-                            fontSize = 11.sp,
-                            color = Color.LightGray,
-                        )
-                    }
-                    if (media.width != null && media.height != null) {
-                        Text(
-                            "${media.width} × ${media.height}  •  ${media.bucketName ?: "Photo library"}",
-                            color = Color.LightGray,
-                        )
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        ViewerActionButton("Share", Icons.Default.Share, Modifier.weight(1f)) { onShare(media) }
-                        ViewerActionButton("Delete", Icons.Default.Delete, Modifier.weight(1f)) { onDelete(media) }
-                    }
-                    onFindSimilar?.let { search ->
-                        TextButton(onClick = { search(media) }, modifier = Modifier.fillMaxWidth()) {
-                            Text("Find similar photos")
-                        }
-                    }
-                    onReadText?.let { read ->
-                        TextButton(onClick = { read(media) }, modifier = Modifier.fillMaxWidth()) { Text("Read text") }
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+            val landscape = maxWidth > maxHeight
+            val photoPane: @Composable (Modifier) -> Unit = { modifier ->
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = modifier,
+                    userScrollEnabled = !zoomed,
+                    key = { photos[it].mediaId },
+                ) { page ->
+                    val pageMedia = photos[page]
+                    ZoomablePhoto(pageMedia.uri, pageMedia.displayName ?: "Photo ${page + 1}") {
+                        if (page == pagerState.currentPage) zoomed = it
                     }
                 }
+            }
+            val detailsPane: @Composable (Modifier) -> Unit = { modifier ->
+                Surface(modifier = modifier, color = Color(0xFF121212), contentColor = Color.White) {
+                    Column(
+                        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(9.dp),
+                    ) {
+                        Text(
+                            text = media.displayName ?: "Photo",
+                            fontSize = 21.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(formatDate(media.dateTaken ?: media.dateAdded?.times(1000)), color = Color.LightGray)
+                        Text("Pinch or double-tap to zoom. Swipe to browse.", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+                        if (score != null) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Match score", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "${MatchScoreFormatter.percentage(score)}%",
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                            Text(
+                                "Relevance indicator derived from cosine similarity; not model confidence or probability.",
+                                fontSize = 11.sp,
+                                color = Color.LightGray,
+                            )
+                        }
+                        if (media.width != null && media.height != null) {
+                            Text(
+                                "${media.width} × ${media.height}  •  ${media.bucketName ?: "Photo library"}",
+                                color = Color.LightGray,
+                            )
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            ViewerActionButton("Share", Icons.Default.Share, Modifier.weight(1f)) { onShare(media) }
+                            ViewerActionButton("Delete", Icons.Default.Delete, Modifier.weight(1f)) { onDelete(media) }
+                        }
+                        onSaveCopy?.let { save ->
+                            OutlinedButton(onClick = { save(media) }, enabled = savingCopyMediaId == null,
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) {
+                                Icon(Icons.Default.SaveAlt, null)
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (savingCopyMediaId == media.mediaId) "Saving…" else "Save a copy")
+                            }
+                        }
+                        onFindSimilar?.let { search ->
+                            TextButton(onClick = { search(media) }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Find similar photos")
+                            }
+                        }
+                        onReadText?.let { read ->
+                            TextButton(onClick = { read(media) }, modifier = Modifier.fillMaxWidth()) { Text("Read text") }
+                        }
+                    }
+                }
+            }
+            if (landscape) Row(Modifier.fillMaxSize()) {
+                photoPane(Modifier.weight(1f).fillMaxSize())
+                detailsPane(Modifier.width(280.dp).fillMaxSize())
+            } else Column(Modifier.fillMaxSize()) {
+                photoPane(Modifier.weight(1f).fillMaxWidth())
+                detailsPane(Modifier.fillMaxWidth().weight(0.85f))
             }
         }
     }
@@ -336,7 +370,7 @@ fun AlbumPhotosScreen(
             }
         } else {
             LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
+                columns = GridCells.Adaptive(110.dp),
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentPadding = PaddingValues(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),

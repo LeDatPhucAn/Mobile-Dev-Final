@@ -62,6 +62,7 @@ object AlbumCatalog {
         RECENTLY_ADDED_ID -> {
             val cutoffSeconds = (nowMillis - RECENT_WINDOW_MILLIS) / 1000
             photos.filter { (it.dateAdded ?: 0) >= cutoffSeconds }
+                .sortedWith(compareByDescending<MediaItem> { it.dateAdded ?: 0 }.thenByDescending { it.mediaId })
         }
         else -> photos.filter { it.bucketId == albumId }
     }

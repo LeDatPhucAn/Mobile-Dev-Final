@@ -9,6 +9,7 @@ import ai.onnxruntime.OrtSession
 import ai.onnxruntime.OnnxJavaType
 import ai.onnxruntime.TensorInfo
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -39,9 +40,15 @@ abstract class MobileClipSession(
                             descriptor.startOffset,
                             descriptor.declaredLength,
                         )
-                        environment.createSession(mappedModel, OrtSession.SessionOptions())
+                        OrtSession.SessionOptions().use { options ->
+                            options.setIntraOpNumThreads(2)
+                            options.setInterOpNumThreads(1)
+                            environment.createSession(mappedModel, options)
+                        }
                     }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Exception) {
                 throw ModelUnavailableException(
                     "Required model asset is unavailable, compressed, or invalid: $modelAsset",

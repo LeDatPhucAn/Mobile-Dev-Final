@@ -3,6 +3,9 @@ package com.example.mobile_image_retrieval.ui
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.createSavedStateHandle
+import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewModelScope
 import com.example.mobile_image_retrieval.AppContainer
 import com.example.mobile_image_retrieval.ai.MobileClipAssets
@@ -22,16 +25,21 @@ import com.example.mobile_image_retrieval.domain.model.SearchResult
 import com.example.mobile_image_retrieval.domain.model.UiError
 import com.example.mobile_image_retrieval.permissions.PhotoAccess
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 data class SearchUiState(
+    val navigation: SearchNavigation? = null,
+    val hasCompletedSearch: Boolean = false,
+    val savingCopyMediaId: Long? = null,
     val query: String = "",
     val resultQuery: String = "",
     val selectedImageUri: String? = null,
@@ -60,17 +68,22 @@ data class SearchUiState(
     val error: UiError? = null,
 )
 
+enum class SearchNavigation { SEARCHING, RESULTS, BACK }
+
 sealed interface SearchEvent {
-    data object Searching : SearchEvent
-    data object ResultsReady : SearchEvent
-    data class Failed(val message: String) : SearchEvent
+    data class CopySaved(val uri: String) : SearchEvent
+    data class CopyFailed(val message: String) : SearchEvent
 }
 
-class SearchViewModel(private val container: AppContainer) : ViewModel() {
-    private val mutableState = MutableStateFlow(SearchUiState())
+class SearchViewModel(private val container: AppContainer, private val savedState: SavedStateHandle = SavedStateHandle()) : ViewModel() {
+    private val mutableState = MutableStateFlow(SearchUiState(
+        query = savedState["query"] ?: "",
+        selectedImageUri = savedState["image"],
+        filters = savedState["filters"] ?: SearchFilters(),
+    ))
     val state: StateFlow<SearchUiState> = mutableState.asStateFlow()
-    private val mutableEvents = MutableSharedFlow<SearchEvent>(extraBufferCapacity = 2)
-    val events = mutableEvents.asSharedFlow()
+    private val mutableEvents = Channel<SearchEvent>(Channel.BUFFERED)
+    val events = mutableEvents.receiveAsFlow()
     val libraryChanges = container.mediaStoreRepository.observeChanges()
     private var searchJob: Job? = null
     private var searchGeneration = 0L
@@ -81,8 +94,18 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
     private var textCountLoaded = false
     private var imageCountLoaded = false
     private var faceCountLoaded = false
+    private var workState: androidx.work.WorkInfo.State? = null
 
     init {
+        viewModelScope.launch {
+            container.indexScheduler.workState.collectLatest { status ->
+                workState = status
+                mutableState.update { current -> current.copy(
+                    indexingStatus = indexingStatus(current.indexedCount, current.libraryTotal),
+                    ocrIndexingStatus = ocrStatus(current.textIndexedCount, current.libraryTotal),
+                ) }
+            }
+        }
         viewModelScope.launch {
             container.database.photoTextDao().observeIndexedCount(OcrModelContract.VERSION).collectLatest { count ->
                 textCountLoaded = true
@@ -123,16 +146,44 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun updateQuery(query: String) = mutableState.update { it.copy(query = query) }
+    private fun saveDraft() {
+        savedState["query"] = state.value.query
+        savedState["image"] = state.value.selectedImageUri
+        savedState["filters"] = state.value.filters
+    }
+
+    fun consumeNavigation() = mutableState.update { it.copy(navigation = null) }
+    fun updateQuery(query: String) {
+        mutableState.update { it.copy(query = query) }
+        saveDraft()
+    }
     fun selectSearchImage(uri: String?) = mutableState.update {
         it.copy(selectedImageUri = uri, filters = if (uri != null && it.filters.searchMode == SearchMode.OCR) it.filters.copy(searchMode = SearchMode.NORMAL) else it.filters)
-    }
+    }.also { saveDraft() }
 
     fun updateSearchMode(mode: SearchMode) = mutableState.update {
         it.copy(filters = it.filters.copy(searchMode = mode))
-    }
+    }.also { saveDraft() }
 
     suspend fun readPhotoText(item: MediaItem) = container.photoTextRepository.read(item)
+
+    fun savePhotoCopy(item: MediaItem) {
+        if (state.value.savingCopyMediaId != null) return
+        mutableState.update { it.copy(savingCopyMediaId = item.mediaId) }
+        viewModelScope.launch {
+            try {
+                val uri = container.photoCopyRepository.saveCopy(item)
+                refreshLibrary().join()
+                mutableEvents.send(SearchEvent.CopySaved(uri.toString()))
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                mutableEvents.send(SearchEvent.CopyFailed(failure.message ?: "Could not save the copy. Check available storage."))
+            } finally {
+                mutableState.update { it.copy(savingCopyMediaId = null) }
+            }
+        }
+    }
 
     fun savePerson(name: String, uri: String, existingId: Long? = null) {
         if (state.value.isSavingPerson) return
@@ -188,7 +239,8 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
             try {
                 val photos = container.mediaStoreRepository.queryImages()
                 val snapshotTimeMillis = System.currentTimeMillis()
-                val albums = container.mediaStoreRepository.albums(photos, snapshotTimeMillis)
+                val albums = withContext(Dispatchers.Default) { container.mediaStoreRepository.albums(photos, snapshotTimeMillis) }
+                val accessible = photos.associateBy { it.mediaId }
                 mutableState.update { current ->
                     current.copy(
                         libraryPhotos = photos,
@@ -196,6 +248,7 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
                         albums = albums,
                         librarySnapshotTimeMillis = snapshotTimeMillis,
                         libraryTotal = photos.size,
+                        results = current.results.filter { accessible[it.media.mediaId]?.dateModified == it.media.dateModified },
                         isLibraryLoading = false,
                         libraryError = null,
                         indexingStatus = indexingStatus(current.indexedCount, photos.size),
@@ -231,22 +284,29 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         }
         if (modelUnavailable != null && filters.searchMode != SearchMode.OCR) {
             mutableState.update { it.copy(error = UiError.ModelUnavailable(modelUnavailable)) }
-            mutableEvents.tryEmit(SearchEvent.Failed(modelUnavailable))
             return
         }
         searchJob?.cancel()
         val generation = ++searchGeneration
-        mutableState.update { it.copy(query = clean, resultQuery = clean, selectedImageUri = imageUri, resultImageUri = imageUri, filters = filters, isSearching = true, error = null) }
-        mutableEvents.tryEmit(SearchEvent.Searching)
+        mutableState.update { it.copy(query = clean, resultQuery = clean, selectedImageUri = imageUri, resultImageUri = imageUri, filters = filters, isSearching = true, error = null, navigation = SearchNavigation.SEARCHING) }
+        saveDraft()
         searchJob = viewModelScope.launch {
             try {
+                libraryRefreshJob?.join()
+                if (state.value.libraryError != null && state.value.libraryPhotos.isEmpty()) {
+                    failSearch("The photo library could not be loaded. Refresh it and try again.")
+                    return@launch
+                }
                 val execution = container.searchRepository.search(clean, filters, imageUri = imageUri)
                 if (generation != searchGeneration) return@launch
                 Log.d(TAG, "embedding=${execution.queryEmbeddingMillis}ms scan=${execution.vectorScanMillis}ms total=${execution.totalMillis}ms")
-                mutableState.update { it.copy(results = execution.results, isSearching = false) }
-                if (imageUri == null) container.searchRepository.saveHistory(clean, execution.results.firstOrNull()?.media?.uri, filters.searchMode)
-                if (generation != searchGeneration) return@launch
-                mutableEvents.emit(SearchEvent.ResultsReady)
+                val accessible = state.value.libraryPhotos.associateBy { it.mediaId }
+                val results = execution.results.filter { accessible[it.media.mediaId]?.dateModified == it.media.dateModified }
+                mutableState.update { it.copy(results = results, isSearching = false, hasCompletedSearch = true, navigation = SearchNavigation.RESULTS) }
+                if (imageUri == null) try {
+                    container.searchRepository.saveHistory(clean, results.firstOrNull()?.media?.uri, filters.searchMode)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (error: Exception) { Log.w(TAG, "Could not save search history", error) }
             } catch (_: kotlinx.coroutines.CancellationException) {
                 if (generation == searchGeneration) mutableState.update { it.copy(isSearching = false) }
             } catch (error: ModelUnavailableException) {
@@ -260,17 +320,22 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
     fun cancelSearch() {
         searchGeneration++
         searchJob?.cancel()
-        mutableState.update { it.copy(isSearching = false) }
+        mutableState.update { it.copy(isSearching = false, navigation = null) }
     }
 
-    fun applyFilters(filters: SearchFilters) {
+    fun applyFilters(filters: SearchFilters, rerun: Boolean = true) {
         mutableState.update { it.copy(filters = filters) }
-        if (state.value.resultQuery.isNotBlank() || state.value.resultImageUri != null) {
+        saveDraft()
+        if (rerun && (state.value.resultQuery.isNotBlank() || state.value.resultImageUri != null)) {
             submitSearch(state.value.resultQuery, filters, if (filters.searchMode == SearchMode.OCR) null else state.value.resultImageUri)
         }
     }
 
-    fun clearHistory() = viewModelScope.launch { container.searchRepository.clearHistory() }
+    fun clearHistory() = viewModelScope.launch {
+        try { container.searchRepository.clearHistory() }
+        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (error: Exception) { mutableState.update { it.copy(error = UiError.Storage("Could not clear search history. Please try again.")) } }
+    }
     fun clearError() = mutableState.update { it.copy(error = null) }
     fun removeIndexedMedia(mediaId: Long) = viewModelScope.launch {
         try {
@@ -293,24 +358,27 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         modelUnavailable != null -> IndexingStatus.Unavailable(modelUnavailable)
         workerState?.status == "UNAVAILABLE" -> IndexingStatus.Unavailable(workerState?.error ?: "Model unavailable")
         total == 0 || minOf(indexed, faces) >= total -> IndexingStatus.Idle
+        workState == androidx.work.WorkInfo.State.ENQUEUED || workState == androidx.work.WorkInfo.State.BLOCKED -> IndexingStatus.Waiting(minOf(indexed, faces), total)
+        workState == androidx.work.WorkInfo.State.RUNNING -> IndexingStatus.Running(minOf(indexed, faces), total)
         workerState?.status == "INTERRUPTED" && workerState?.total == total -> IndexingStatus.Interrupted(minOf(indexed, faces), total)
-        else -> IndexingStatus.Running(minOf(indexed, faces), total)
+        else -> IndexingStatus.Waiting(minOf(indexed, faces), total)
     }
 
     private fun ocrStatus(indexed: Int, total: Int): IndexingStatus = when {
         !textCountLoaded || total == 0 || indexed >= total -> IndexingStatus.Idle
+        workState == androidx.work.WorkInfo.State.ENQUEUED || workState == androidx.work.WorkInfo.State.BLOCKED -> IndexingStatus.Waiting(indexed, total)
+        workState == androidx.work.WorkInfo.State.RUNNING -> IndexingStatus.Running(indexed, total)
         ocrWorkerState?.status == "INTERRUPTED" && ocrWorkerState?.total == total -> IndexingStatus.Interrupted(indexed, total)
-        else -> IndexingStatus.Running(indexed, total)
+        else -> IndexingStatus.Waiting(indexed, total)
     }
 
     private suspend fun failSearch(message: String) {
-        mutableState.update { it.copy(isSearching = false, error = UiError.Search(message)) }
-        mutableEvents.emit(SearchEvent.Failed(message))
+        mutableState.update { it.copy(isSearching = false, error = UiError.Search(message), navigation = SearchNavigation.BACK) }
     }
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T = SearchViewModel(container) as T
+        override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T = SearchViewModel(container, extras.createSavedStateHandle()) as T
     }
 
     companion object { private const val TAG = "SemanticSearch" }
