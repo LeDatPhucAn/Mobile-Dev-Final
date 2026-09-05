@@ -1,4 +1,4 @@
-﻿# Mobile Image Retrieval (CS426 Final Project)
+# Mobile Image Retrieval (CS426 Final Project)
 
 An intelligent, native on-device Android application for privacy-preserving semantic photo search, personalized face retrieval, and Vietnamese receipt/screenshot OCR.
 
@@ -11,13 +11,15 @@ An intelligent, native on-device Android application for privacy-preserving sema
 
 ### Group Members & Detailed Work Allocation (Ascending Student ID Order)
 
-| Student ID | Full Name | Primary Work Packages & Responsibilities | Deliverables & Completed Work | Share (%) |
+This allocation matches Section 3 of the report: each member has two primary work packages and an equal share of testing, giving each member 25% of the planned allocation when work packages are counted equally. It is a proposed, balanced planning assignment, not a record of historical contribution or measured effort.
+
+| Student ID | Full Name | Primary Work Packages | Deliverable and Completion Evidence | Planned Share |
 | :--- | :--- | :--- | :--- | :---: |
-| **24125041** | **Pham Nguyen Minh Quan** | • Compose UI & Navigation<br>• Report & Final Presentation | • Implemented 8 Jetpack Compose feature screens (`ui/screens/`), adaptive grids, photo viewer (pan/pinch/zoom), landscape layouts, search state persistence across lifecycle/process recreation.<br>• Authored project report and prepared demo presentation materials. | 25% |
-| **24125048** | **Tran Canh Anh Tuan** | • Data & Android Media Integration<br>• Background Indexing Pipelines | • Designed Room SQLite database, schemas, DAOs, Float32 vector embeddings, database migrations (v1 → v4), search history.<br>• MediaStore querying/safe photo copying to `Pictures/Photo Search`, sharing & deletion consent flows.<br>• Implemented `WorkManager` incremental background indexing worker (`PhotoIndexWorker`) with battery constraints & transactional revision guards. | 25% |
-| **24125049** | **Vong Chi Van** | • Visual Semantic Retrieval<br>• Face Enrollment & Search | • Implemented ONNX Runtime sessions for **MobileCLIP2-S0** image/text encoders, preprocessors, tokenizers, L2 normalization, exact top-K dot-product heap search.<br>• Integrated **SCRFD** face detection (`det_500m.onnx`), 5-point landmark alignment, and **MobileFaceNet** (`w600k_mbf.onnx`) face embedding for distinct multi-person query matching (`@people`). | 25% |
-| **24125052** | **Le Dat Phuc An** | • Vietnamese OCR & Full-Text Search<br>• Product Scope & Requirements | • Bundled Google ML Kit Latin Text Recognition for offline Vietnamese OCR, SQLite `FTS4` text indexing (`photo_text_fts`), diacritics folding (`hoa don` ↔ `hóa đơn`), in-viewer text reader/copying.<br>• Maintained requirement mapping, test specs, and architecture validation. | 25% |
-| **All Members** | **All 4 Members** | • Testing & Validation | • 63 JVM unit tests & 40 Android instrumentation tests covering vector math, Room migrations, distinct face assignments, MediaStore operations, OCR pipelines, and UI integrity. | Equal |
+| **24125041** | **Pham Nguyen Minh Quan** | Compose UI and navigation; report and presentation | Eight feature screens, adaptive grids, viewer interactions, permission states, and saved-state handling are implemented in `MainActivity` and `ui/`. Report source and demonstration protocol are prepared; final artifact review and presentation delivery remain pending. | 25% |
+| **24125048** | **Tran Canh Anh Tuan** | Requirements and product scope; data and Android integration | Requirement mapping, topic, use cases, and demonstration sequence are documented in `COURSE_REQUIREMENTS.md` and this README. Room schema/migrations, MediaStore browsing, history, copying, sharing, and deletion integration are implemented in `data/` and `MainActivity`. | 25% |
+| **24125049** | **Vong Chi Van** | Visual retrieval; face enrollment and search | Export contract, CLIP preprocessing/tokenization, embeddings, exact top-K, and image/text combination are implemented in `ai/` and export tooling. SCRFD/MobileFaceNet integration, alignment, references, distinct-person matching, and versioned caches are implemented in `ai/` and repositories. | 25% |
+| **24125052** | **Le Dat Phuc An** | OCR and text retrieval; background indexing | Bundled recognition, FTS4 search, and the text reader are implemented in OCR/data/UI components. The incremental worker, scheduling, and consistency protection are implemented in `worker/` and repositories. | 25% |
+| **All members** | **All four members** | Testing and validation | Shared equally: unit and instrumentation tests for retrieval, Room persistence, OCR, indexing, and media operations; build/lint checks and device regression testing. Existing tests and audit results provide the baseline; record new outcomes and defects. | Included above |
 
 ---
 

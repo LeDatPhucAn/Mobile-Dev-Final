@@ -1,4 +1,5 @@
 % !TeX program = xelatex
+% Reliable Windows build: powershell -NoProfile -ExecutionPolicy Bypass -File docs/build-report.ps1
 % !TeX options = -synctex=1 -interaction=nonstopmode -halt-on-error -file-line-error -output-directory="%OUTDIR%" "%DOC%"
 % From the repository root: tectonic --outdir docs/build docs/report.tex
 % Or, from docs/, run twice: xelatex -synctex=1 -interaction=nonstopmode -halt-on-error -output-directory=build report.tex
@@ -15,7 +16,7 @@
   pdfsubject={Final Project for CS426 Mobile Device Application Development},
   bookmarksnumbered=true}
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{5pt plus 1pt minus 1pt}
+\setlength{\parskip}{4pt plus 1pt minus 1pt}
 \setlength{\emergencystretch}{2em}
 \setcounter{tocdepth}{1}
 \setcounter{secnumdepth}{2}
@@ -23,7 +24,7 @@
 \widowpenalty=10000
 \pagestyle{plain}
 \newcommand{\code}[1]{{\small\texttt{#1}}}
-\newcommand{\reportsection}[1]{\clearpage\section{#1}}
+\newcommand{\reportsection}[1]{\section{#1}}
 \newcommand{\pending}{\textit{To be confirmed}}
 \newcommand{\reporttablecaption}[2]{\par\refstepcounter{table}\label{tab:#1}\noindent{\small\textbf{Table~\thetable.} #2}\par\nopagebreak[4]\vspace{3pt}\nopagebreak[4]}
 \newcommand{\reportfigurecaption}[2]{\par\refstepcounter{figure}\label{fig:#1}{\small\textbf{Figure~\thefigure.} #2}\par}
@@ -89,7 +90,7 @@ The implemented system provides eight connected feature screens and supports ret
 
 
 \subsection*{Report Organization}
-Sections 1--5 establish the application context and requirements. Sections 6--12 describe the architecture and implementation. Sections 13--14 document setup and installation. Sections 15--18 present validation, self-assessment, limitations, work allocation, and the demonstration plan.
+Sections 1--5 establish the application context, work allocation, requirements, and screens. Sections 6--13 describe usability, architecture, implementation, and technology. Sections 14--15 document setup and installation. Sections 16--18 present validation, self-assessment, and limitations.
 
 \clearpage
 \pdfbookmark[0]{Contents}{contents}
@@ -248,14 +249,14 @@ Text reader & View, select, and copy the original recognized text.\\
 The viewer has routes for results, the library, and album contexts. Save a copy produces a snackbar with a View action that opens the new media item through Recently Added. “Find similar photos” makes the current photo the next query's image reference.
 
 
-\clearpage
 \subsection{Search Screen and Library Access}
 
 The Search destination brings query entry, retrieval-mode selection, indexing status, and recent searches into one screen. The first screenshot shows Normal query selected, with controls for an image query, saved people, and a date filter. Suggested queries help users begin a search, while the indexed-photo count and Refresh action communicate library readiness.
 
 The second screenshot shows the lower portion of the same destination. Recent searches display query text, relative times, and thumbnails where available. Below them, the Your library grid provides direct access to photos. The persistent bottom navigation connects this workflow to Albums and People.
 
-\begin{center}
+\begin{figure}[htbp]
+\centering
 \begin{minipage}[t]{0.48\linewidth}
 \centering
 \includegraphics[height=155mm,width=\linewidth,keepaspectratio]{images/794956303_2283311895768519_8809338845193422926_n.png}
@@ -266,16 +267,16 @@ The second screenshot shows the lower portion of the same destination. Recent se
 \includegraphics[height=155mm,width=\linewidth,keepaspectratio]{images/795807520_876162862099713_4542742628279600881_n.png}
 \reportfigurecaption{search-library}{Search screen scrolled to recent queries and the device-photo library grid.}
 \end{minipage}
-\end{center}
+\end{figure}
 
-\clearpage
 \subsection{Album Browsing and Person Enrollment}
 
 Albums provides a collection-based route to photos. Its screenshot lists All Photos, Recently Added, and Camera, each with a preview and photo count. Selecting a collection leads to its contents, from which the user can open the photo viewer. The refresh control updates the displayed library collections.
 
 People manages the identities used in person-filtered queries. The screenshot shows an enrolled entry named \code{alex}, its \code{@alex} handle, a face thumbnail, and controls to change the face photo or remove the entry. Add person starts enrollment, and the face-indexing count indicates progress. After enrollment, the user can return to Search and combine a saved handle with a scene description. The displayed counts describe the captured library state.
 
-\begin{center}
+\begin{figure}[htbp]
+\centering
 \begin{minipage}[t]{0.48\linewidth}
 \centering
 \includegraphics[height=155mm,width=\linewidth,keepaspectratio]{images/796249644_2192294021318756_4995010907990089971_n.png}
@@ -286,7 +287,7 @@ People manages the identities used in person-filtered queries. The screenshot sh
 \includegraphics[height=155mm,width=\linewidth,keepaspectratio]{images/797249071_1062339186407189_1599801792573393536_n.png}
 \reportfigurecaption{people-screen}{People: explicit enrollment and saved-face management support queries using named handles.}
 \end{minipage}
-\end{center}
+\end{figure}
 
 \reportsection{User Interface and Usability}
 
@@ -608,7 +609,7 @@ Alternatively, copy the APK to the device and open it with Android's package ins
 
 \subsection{First-run Procedure}
 \begin{enumerate}
-\item Grant photo access. Android 10--12L uses \code{READ\_EXTERNAL\_STORAGE}; Android 13+ uses \code{READ\_MEDIA\_IMAGES}. Android 14+ also supports selected-photo access through \code{READ\_MEDIA\_VISUAL\_USER\_SELECTED}.
+\item Grant photo access. Android 10--12L uses \path{READ_EXTERNAL_STORAGE}; Android 13+ uses \path{READ_MEDIA_IMAGES}. Android 14+ also supports selected-photo access through \path{READ_MEDIA_VISUAL_USER_SELECTED}.
 \item Start with a small accessible set containing a clear scene, a single-face portrait, and a legible screenshot or receipt. Open Albums to confirm actual device photos are visible.
 \item Observe OCR and visual indexing progress. A battery-not-low constraint can leave background work queued. Search completed photos while remaining stages continue.
 \item Try Normal query with an English scene description, OCR search with known visible words, and a saved handle after enrolling a person. Then open a result and use Read text or Save a copy.
@@ -657,7 +658,13 @@ Source inspection counted \textbf{63 unit-test annotations across 13 files} and 
 The supplementary review verified source structure and asset consistency. Build, lint, and runtime outcomes remain attributed to the project audit; the asset checks do not constitute an additional inference benchmark.
 
 \subsection{Reproducing Runtime Checks}
-After completing Section~\ref{sec:setup}, run \code{:app:testDebugUnitTest}, \code{:app:lintDebug}, and \code{:app:connectedDebugAndroidTest} with the wrapper. Use a dedicated test emulator. The project's \code{android.injected.androidTest.leaveApksInstalledAfterRun=true} setting retains installed APKs after connected tests to reduce unintended loss of a development index.
+After completing Section~\ref{sec:setup}, run the following tasks with the wrapper on a dedicated test emulator:
+\begin{verbatim}
+:app:testDebugUnitTest
+:app:lintDebug
+:app:connectedDebugAndroidTest
+\end{verbatim}
+The project's \path{android.injected.androidTest.leaveApksInstalledAfterRun=true} setting retains installed APKs after connected tests to reduce unintended loss of a development index.
 
 
 \reportsection{Self-Assessment Against the Course Rubric}
