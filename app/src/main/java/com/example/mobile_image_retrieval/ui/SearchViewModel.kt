@@ -7,8 +7,10 @@ import androidx.lifecycle.viewModelScope
 import com.example.mobile_image_retrieval.AppContainer
 import com.example.mobile_image_retrieval.ai.MobileClipAssets
 import com.example.mobile_image_retrieval.ai.ModelUnavailableException
+import com.example.mobile_image_retrieval.ai.FaceModelContract
 import com.example.mobile_image_retrieval.data.db.SearchHistoryEntity
 import com.example.mobile_image_retrieval.data.db.IndexingStateEntity
+import com.example.mobile_image_retrieval.data.db.SavedPerson
 import com.example.mobile_image_retrieval.domain.model.Album
 import com.example.mobile_image_retrieval.domain.model.IndexingStatus
 import com.example.mobile_image_retrieval.domain.model.MediaItem
@@ -29,6 +31,12 @@ import kotlinx.coroutines.launch
 data class SearchUiState(
     val query: String = "",
     val resultQuery: String = "",
+    val selectedImageUri: String? = null,
+    val resultImageUri: String? = null,
+    val people: List<SavedPerson> = emptyList(),
+    val isSavingPerson: Boolean = false,
+    val personSaveError: String? = null,
+    val personSaveVersion: Long = 0,
     val photoAccess: PhotoAccess = PhotoAccess.DENIED,
     val indexingStatus: IndexingStatus = IndexingStatus.Idle,
     val isSearching: Boolean = false,
@@ -43,6 +51,7 @@ data class SearchUiState(
     val librarySnapshotTimeMillis: Long = 0,
     val libraryTotal: Int = 0,
     val indexedCount: Int = 0,
+    val faceIndexedCount: Int = 0,
     val error: UiError? = null,
 )
 
@@ -66,6 +75,14 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
 
     init {
         viewModelScope.launch {
+            container.database.faceEmbeddingDao().observeIndexedCount(FaceModelContract.VERSION).collectLatest { count ->
+                mutableState.update { current -> current.copy(faceIndexedCount = count, indexingStatus = indexingStatus(current.indexedCount, current.libraryTotal, count)) }
+            }
+        }
+        viewModelScope.launch {
+            container.referencePhotoRepository.people.collectLatest { people -> mutableState.update { it.copy(people = people) } }
+        }
+        viewModelScope.launch {
             container.searchRepository.history.collectLatest { history -> mutableState.update { it.copy(history = history) } }
         }
         viewModelScope.launch {
@@ -84,6 +101,35 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun updateQuery(query: String) = mutableState.update { it.copy(query = query) }
+    fun selectSearchImage(uri: String?) = mutableState.update { it.copy(selectedImageUri = uri) }
+
+    fun savePerson(name: String, uri: String, existingId: Long? = null) {
+        if (state.value.isSavingPerson) return
+        mutableState.update { it.copy(isSavingPerson = true, personSaveError = null) }
+        viewModelScope.launch {
+            try {
+                container.referencePhotoRepository.savePerson(name, uri, existingId)
+                mutableState.update { it.copy(isSavingPerson = false, personSaveVersion = it.personSaveVersion + 1) }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                mutableState.update { it.copy(isSavingPerson = false) }
+                throw cancelled
+            } catch (error: Exception) {
+                mutableState.update { it.copy(isSavingPerson = false, personSaveError = error.message ?: "Could not save this person.") }
+            }
+        }
+    }
+
+    fun clearPersonSaveError() = mutableState.update { it.copy(personSaveError = null) }
+
+    fun removePerson(id: Long) = viewModelScope.launch {
+        try {
+            container.referencePhotoRepository.removePerson(id)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            mutableState.update { it.copy(error = UiError.Storage(error.message ?: "Could not remove this person.")) }
+        }
+    }
 
     fun updatePhotoAccess(access: PhotoAccess) {
         mutableState.update { it.copy(photoAccess = access, error = null) }
@@ -140,9 +186,17 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         }.also { libraryRefreshJob = it }
     }
 
-    fun submitSearch(query: String = state.value.query, filters: SearchFilters = state.value.filters) {
+    fun submitSearch(
+        query: String = state.value.query,
+        filters: SearchFilters = state.value.filters,
+        imageUri: String? = state.value.selectedImageUri,
+    ) {
         val clean = query.trim()
-        if (clean.isEmpty()) return
+        if (clean.isEmpty() && imageUri == null) return
+        if (state.value.photoAccess == PhotoAccess.DENIED) {
+            mutableState.update { it.copy(error = UiError.Permission("Photo access is required to search your library.")) }
+            return
+        }
         if (modelUnavailable != null) {
             mutableState.update { it.copy(error = UiError.ModelUnavailable(modelUnavailable)) }
             mutableEvents.tryEmit(SearchEvent.Failed(modelUnavailable))
@@ -150,15 +204,15 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         }
         searchJob?.cancel()
         val generation = ++searchGeneration
-        mutableState.update { it.copy(query = clean, resultQuery = clean, filters = filters, isSearching = true, error = null) }
+        mutableState.update { it.copy(query = clean, resultQuery = clean, selectedImageUri = imageUri, resultImageUri = imageUri, filters = filters, isSearching = true, error = null) }
         mutableEvents.tryEmit(SearchEvent.Searching)
         searchJob = viewModelScope.launch {
             try {
-                val execution = container.searchRepository.search(clean, filters)
+                val execution = container.searchRepository.search(clean, filters, imageUri = imageUri)
                 if (generation != searchGeneration) return@launch
-                Log.d(TAG, "query='$clean' text=${execution.textEmbeddingMillis}ms scan=${execution.vectorScanMillis}ms total=${execution.totalMillis}ms")
+                Log.d(TAG, "embedding=${execution.queryEmbeddingMillis}ms scan=${execution.vectorScanMillis}ms total=${execution.totalMillis}ms")
                 mutableState.update { it.copy(results = execution.results, isSearching = false) }
-                container.searchRepository.saveHistory(clean, execution.results.firstOrNull()?.media?.uri)
+                if (imageUri == null) container.searchRepository.saveHistory(clean, execution.results.firstOrNull()?.media?.uri)
                 if (generation != searchGeneration) return@launch
                 mutableEvents.emit(SearchEvent.ResultsReady)
             } catch (_: kotlinx.coroutines.CancellationException) {
@@ -179,7 +233,9 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
 
     fun applyFilters(filters: SearchFilters) {
         mutableState.update { it.copy(filters = filters) }
-        if (state.value.resultQuery.isNotBlank()) submitSearch(state.value.resultQuery, filters)
+        if (state.value.resultQuery.isNotBlank() || state.value.resultImageUri != null) {
+            submitSearch(state.value.resultQuery, filters, state.value.resultImageUri)
+        }
     }
 
     fun clearHistory() = viewModelScope.launch { container.searchRepository.clearHistory() }
@@ -200,12 +256,12 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    private fun indexingStatus(indexed: Int, total: Int): IndexingStatus = when {
+    private fun indexingStatus(indexed: Int, total: Int, faces: Int = state.value.faceIndexedCount): IndexingStatus = when {
         modelUnavailable != null -> IndexingStatus.Unavailable(modelUnavailable)
         workerState?.status == "UNAVAILABLE" -> IndexingStatus.Unavailable(workerState?.error ?: "Model unavailable")
-        workerState?.status == "INTERRUPTED" && workerState?.total == total -> IndexingStatus.Interrupted(indexed, total)
-        total == 0 || indexed >= total -> IndexingStatus.Idle
-        else -> IndexingStatus.Running(indexed, total)
+        workerState?.status == "INTERRUPTED" && workerState?.total == total -> IndexingStatus.Interrupted(minOf(indexed, faces), total)
+        total == 0 || minOf(indexed, faces) >= total -> IndexingStatus.Idle
+        else -> IndexingStatus.Running(minOf(indexed, faces), total)
     }
 
     private suspend fun failSearch(message: String) {

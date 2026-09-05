@@ -80,3 +80,50 @@ interface IndexingStateDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(state: IndexingStateEntity)
 }
+
+@Dao
+interface PersonDao {
+    @Query("SELECT id, name, handle, thumbnail, embeddingModel FROM people ORDER BY handle")
+    fun observePeople(): Flow<List<SavedPerson>>
+
+    @Query("SELECT * FROM people WHERE handle IN (:handles)")
+    suspend fun byHandles(handles: List<String>): List<PersonEntity>
+
+    @Insert
+    suspend fun insert(person: PersonEntity)
+
+    @Query("UPDATE people SET thumbnail = :thumbnail, embedding = :embedding, embeddingDimension = :dimension, embeddingModel = :model WHERE id = :id")
+    suspend fun updateFace(id: Long, thumbnail: ByteArray, embedding: ByteArray, dimension: Int, model: String): Int
+
+    @Query("DELETE FROM people WHERE id = :id")
+    suspend fun delete(id: Long)
+}
+
+@Dao
+interface FaceEmbeddingDao {
+    @Query("SELECT * FROM face_index")
+    suspend fun indexStates(): List<FaceIndexEntity>
+
+    @Query("SELECT COUNT(*) FROM face_index AS f INNER JOIN media_embeddings AS m ON f.mediaId = m.mediaId WHERE f.modelVersion = :model AND f.dateModified = m.dateModified")
+    fun observeIndexedCount(model: String): Flow<Int>
+
+    @Query("SELECT f.* FROM face_embeddings AS f INNER JOIN face_index AS s ON f.mediaId = s.mediaId INNER JOIN media_embeddings AS m ON f.mediaId = m.mediaId WHERE f.mediaId IN (:ids) AND s.modelVersion = :model AND s.dateModified = m.dateModified ORDER BY f.mediaId, f.faceIndex")
+    suspend fun forMedia(ids: List<Long>, model: String): List<FaceEmbeddingEntity>
+
+    @Query("DELETE FROM face_embeddings WHERE mediaId = :mediaId")
+    suspend fun deleteFaces(mediaId: Long)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun writeState(state: FaceIndexEntity)
+
+    @Insert
+    suspend fun insertFaces(faces: List<FaceEmbeddingEntity>)
+
+    @Transaction
+    suspend fun replace(state: FaceIndexEntity, faces: List<FaceEmbeddingEntity>) {
+        require(faces.all { it.mediaId == state.mediaId })
+        deleteFaces(state.mediaId)
+        insertFaces(faces)
+        writeState(state) // Empty detections also mark the photo as processed.
+    }
+}

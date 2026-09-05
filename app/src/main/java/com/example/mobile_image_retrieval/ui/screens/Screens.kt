@@ -3,6 +3,9 @@
 package com.example.mobile_image_retrieval.ui.screens
 
 import android.text.format.DateUtils
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -93,7 +96,13 @@ fun SearchHomeScreen(
     onClearHistory: () -> Unit,
     onOpenFilters: () -> Unit,
     onPhoto: (Long) -> Unit,
+    onSelectImage: (String?) -> Unit = {},
+    onOpenPeople: () -> Unit = {},
+    onHistorySearch: (String) -> Unit = onSearch,
 ) {
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let { onSelectImage(it.toString()) }
+    }
     if (state.photoAccess == PhotoAccess.DENIED) {
         PermissionScreen(onRequestPermission)
         return
@@ -123,19 +132,45 @@ fun SearchHomeScreen(
                 value = state.query,
                 onValueChange = onQueryChanged,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Describe what you're looking for...") },
+                placeholder = { Text("Try @alex at the beach...") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 trailingIcon = { Icon(Icons.Default.AutoAwesome, "Semantic search") },
                 singleLine = true,
                 shape = RoundedCornerShape(18.dp),
             )
+            val mention = Regex("(?:^|\\s)@([\\p{L}\\p{M}\\p{N}_]*)$").find(state.query)
+            if (mention != null) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.people.filter { it.handle.startsWith(mention.groupValues[1], ignoreCase = true) }.take(6).forEach { person ->
+                        AssistChip(onClick = {
+                            val start = state.query.lastIndexOf('@')
+                            onQueryChanged(state.query.take(start) + "@${person.handle} ")
+                        }, label = { Text("@${person.handle}") })
+                    }
+                }
+            }
+            state.selectedImageUri?.let { uri ->
+                Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    PhotoThumbnail(uri, Modifier.size(64.dp), "Search reference")
+                    Text("Find similar photos", Modifier.weight(1f).padding(horizontal = 12.dp))
+                    IconButton(onClick = { onSelectImage(null) }) { Icon(Icons.Default.Close, "Remove search image") }
+                }
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AssistChip(
+                    onClick = { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                    label = { Text(if (state.selectedImageUri == null) "Search by image" else "Change image") },
+                    leadingIcon = { Icon(Icons.Default.PhotoLibrary, null) },
+                )
+                AssistChip(onClick = onOpenPeople, label = { Text("Saved people") })
+            }
             Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AssistChip(onClick = onOpenFilters, label = { Text(timeRangeLabel(state.filters.timeRange) + "  ▾") })
                 AssistChip(onClick = onOpenFilters, label = { Text((state.filters.mediaType?.let { if (it == MediaType.IMAGE) "Photos" else "Videos" } ?: "All photos") + "  ▾") })
             }
             Button(
                 onClick = { onSearch(state.query) },
-                enabled = state.query.isNotBlank(),
+                enabled = state.query.isNotBlank() || state.selectedImageUri != null,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 shape = RoundedCornerShape(14.dp),
             ) { Text("Search") }
@@ -145,7 +180,7 @@ fun SearchHomeScreen(
             is IndexingStatus.Unavailable -> item {
                 Surface(color = Color(0xFFFFF5E6), shape = RoundedCornerShape(14.dp)) {
                     Column(Modifier.padding(14.dp)) {
-                        Text("Semantic model unavailable", fontWeight = FontWeight.SemiBold)
+                        Text("Search model unavailable", fontWeight = FontWeight.SemiBold)
                         Text(indexing.reason, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -173,7 +208,7 @@ fun SearchHomeScreen(
                     TextButton(onClick = onClearHistory) { Text("Clear") }
                 }
             }
-            items(state.history, key = { it.id }) { history -> HistoryRow(history) { onSearch(history.query) } }
+            items(state.history, key = { it.id }) { history -> HistoryRow(history) { onHistorySearch(history.query) } }
         }
         if (state.recentPhotos.isNotEmpty()) {
             item { Text("Your library", fontWeight = FontWeight.SemiBold, fontSize = 18.sp) }
@@ -270,8 +305,17 @@ fun ResultsScreen(
         )
     }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
-            Text("“${state.resultQuery}”", fontSize = 25.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp))
+            Text(state.resultQuery.ifBlank { "Similar photos" }, fontSize = 25.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp))
+            state.resultImageUri?.let { uri ->
+                Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    PhotoThumbnail(uri, Modifier.size(52.dp), "Search reference")
+                    Text("Image similarity search", Modifier.padding(start = 12.dp))
+                }
+            }
             Text("${state.results.size} results", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(8.dp))
+            if (state.resultQuery.contains('@') && state.faceIndexedCount < state.libraryTotal) {
+                Text("Face indexing: ${state.faceIndexedCount} / ${state.libraryTotal} photos. Results may be incomplete.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(8.dp))
+            }
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 AssistChip(onClick = onOpenFilters, label = { Text(timeRangeLabel(state.filters.timeRange) + "  ▾") })
                 if (state.filters != SearchFilters()) TextButton(onClick = onClearFilters) { Text("Clear") }

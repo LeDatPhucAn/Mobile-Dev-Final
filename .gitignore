@@ -23,6 +23,8 @@ app/build/
 
 *.pt
 *.onnx
+!app/src/main/assets/models/det_500m.onnx
+!app/src/main/assets/models/w600k_mbf.onnx
 
 ml-mobileclip/
 MobileCLIP2-S0/
