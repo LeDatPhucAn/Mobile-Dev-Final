@@ -1,6 +1,7 @@
 % !TeX program = xelatex
+% !TeX options = -synctex=1 -interaction=nonstopmode -halt-on-error -file-line-error -output-directory="%OUTDIR%" "%DOC%"
 % From the repository root: tectonic --outdir docs/build docs/report.tex
-% Or, from docs/, run twice: xelatex -interaction=nonstopmode -halt-on-error report.tex
+% Or, from docs/, run twice: xelatex -synctex=1 -interaction=nonstopmode -halt-on-error -output-directory=build report.tex
 % Use XeLaTeX, LuaLaTeX, or Tectonic for the Vietnamese Unicode text.
 % Default bundled Latin Modern fonts; no system fonts or fontspec required.
 \documentclass[11pt,a4paper]{article}
@@ -88,7 +89,7 @@ The implemented system provides eight connected feature screens and supports ret
 
 
 \subsection*{Report Organization}
-Sections 1--5 establish the application context and requirements. Sections 6--12 describe the architecture and implementation. Sections 13--14 document setup and installation. Sections 15--19 present validation, self-assessment, limitations, work allocation, and the demonstration plan.
+Sections 1--5 establish the application context and requirements. Sections 6--12 describe the architecture and implementation. Sections 13--14 document setup and installation. Sections 15--18 present validation, self-assessment, limitations, work allocation, and the demonstration plan.
 
 \clearpage
 \pdfbookmark[0]{Contents}{contents}
@@ -149,6 +150,32 @@ User with limited connectivity & Browse and search accessible photos without upl
 \item \textbf{Find known people together.} The user enrolls two people separately and searches their handles together. Each person must match a distinct detected face. Adding a visual description further ranks the photos that pass the identity filter.
 \item \textbf{Reuse a found image.} The user opens a result, selects Save a copy, and follows View to the new image in Recently Added. The original photo remains in place.
 \end{enumerate}
+\reportsection{Work Allocation and Collaboration}
+\label{sec:division}
+
+\subsection{Team Composition}
+The final project for \CourseCode{}: \CourseTitle{} is submitted by the following four-member team:
+
+\begin{center}
+\TeamMembers
+\end{center}
+
+\subsection{Attribution Status}
+The table below proposes a randomized, balanced allocation: each member receives two primary work packages, and testing is shared equally by all four members. Each member therefore has a 25\% share of the planned allocation, counting work packages equally. This allocation is a planning assignment; it does not establish historical contribution or measured effort.
+
+\reporttablecaption{contributions}{Work Allocation and Deliverable Status}
+\begin{reporttable}{P{\dimexpr0.2333\linewidth-2\tabcolsep\relax}P{\dimexpr0.2444\linewidth-2\tabcolsep\relax}P{\dimexpr0.5222\linewidth-2\tabcolsep\relax}}
+\textbf{Work package} & \textbf{Member} & \textbf{Deliverable and completion evidence}\\\hline
+Requirements and product scope & Le Dat Phuc An & Requirement mapping, topic, use cases, and demonstration sequence in COURSE\_REQUIREMENTS.md and README. Documentation exists.\\
+Compose UI and navigation & Pham Nguyen Minh Quan & Eight feature screens, adaptive grids, viewer interactions, permission states, saved-state handling. Implemented in MainActivity and ui/.\\
+Data and Android integration & Tran Canh Anh Tuan & Room schema/migrations, MediaStore browsing, history, copying, sharing/deletion integration. Implemented in data/ and MainActivity.\\
+Visual retrieval & Vong Chi Van & Export contract, CLIP preprocessing/tokenization, embeddings, exact top-K, image/text combination. Implemented in ai/ and export tooling.\\
+Face enrollment and search & Vong Chi Van & SCRFD/MobileFaceNet integration, alignment, references, distinct-person matching, versioned caches. Implemented in ai/ and repositories.\\
+Vietnamese OCR & Le Dat Phuc An & Bundled recognition, accent folding, FTS4, text reader, composing-input preservation. Implemented in OCR/data/UI components.\\
+Background indexing & Tran Canh Anh Tuan & Incremental worker, scheduling, and consistency protection. Implemented in worker/ and repositories.\\
+Report and presentation & Pham Nguyen Minh Quan & Report source and demonstration protocol prepared. Final artifact review and presentation delivery remain pending.\\
+Testing and validation & All four members (equal share) & Unit and instrumentation tests for retrieval, Room persistence, OCR, indexing, and media operations; build/lint checks and device regression testing. Existing tests and audit results provide the baseline; record new outcomes and defects.\\
+\end{reporttable}
 
 \subsection{Operating Assumptions}
 
@@ -186,8 +213,7 @@ Device integration satisfies the supplied alternative to an external web API. A 
 
 \subsection{Assessment Scope}
 
-The assessment scope comprises application implementation, technical quality, interface design, originality, documentation, presentation, and collaboration. This report addresses the required documentation categories and provides a demonstration protocol in Section 19. Recording completion and individual contributions require separate supporting records.
-
+The assessment scope comprises application implementation, technical quality, interface design, originality, documentation, presentation, and collaboration. 
 
 \reportsection{Application Screens and Navigation}
 \label{sec:screens}
@@ -639,7 +665,8 @@ After completing Section~\ref{sec:setup}, run \code{:app:testDebugUnitTest}, \co
 \reportsection{Self-Assessment Against the Course Rubric}
 
 \subsection{Assessment Method}
-The self-assessment maps implemented capabilities and documented evidence to the course marking rubric. A capability is classified as implemented when it is supported by an identifiable source component and relevant audit or test evidence. The implementation criteria account for 90\% of the available marks; report, presentation, and collaboration account for the remaining 10\%. Final grading remains subject to assessor review.
+The self-assessment maps implemented capabilities and documented evidence to the course marking rubric. 
+A capability is classified as implemented when it is supported by an identifiable source component and relevant audit or test evidence.
 
 \reporttablecaption{assessment}{Self-Assessment Against the Course Marking Rubric}
 \begin{reporttable}{P{\dimexpr0.2667\linewidth-2\tabcolsep\relax}P{\dimexpr0.1000\linewidth-2\tabcolsep\relax}P{\dimexpr0.6333\linewidth-2\tabcolsep\relax}}
@@ -686,31 +713,7 @@ The product indexes accessible images only. Video frame sampling, temporal video
 \end{enumerate}
 
 
-\reportsection{Work Allocation and Collaboration}
-\label{sec:division}
 
-\subsection{Team Composition}
-The final project for \CourseCode{}: \CourseTitle{} is submitted by the following four-member team:
 
-\begin{center}
-\TeamMembers
-\end{center}
-
-\subsection{Attribution Status}
-The table below proposes a randomized, balanced allocation: each member receives two primary work packages, and testing is shared equally by all four members. Each member therefore has a 25\% share of the planned allocation, counting work packages equally. This allocation is a planning assignment; it does not establish historical contribution or measured effort.
-
-\reporttablecaption{contributions}{Work Allocation and Deliverable Status}
-\begin{reporttable}{P{\dimexpr0.2333\linewidth-2\tabcolsep\relax}P{\dimexpr0.2444\linewidth-2\tabcolsep\relax}P{\dimexpr0.5222\linewidth-2\tabcolsep\relax}}
-\textbf{Work package} & \textbf{Member} & \textbf{Deliverable and completion evidence}\\\hline
-Requirements and product scope & Le Dat Phuc An & Requirement mapping, topic, use cases, and demonstration sequence in COURSE\_REQUIREMENTS.md and README. Documentation exists.\\
-Compose UI and navigation & Pham Nguyen Minh Quan & Eight feature screens, adaptive grids, viewer interactions, permission states, saved-state handling. Implemented in MainActivity and ui/.\\
-Data and Android integration & Tran Canh Anh Tuan & Room schema/migrations, MediaStore browsing, history, copying, sharing/deletion integration. Implemented in data/ and MainActivity.\\
-Visual retrieval & Vong Chi Van & Export contract, CLIP preprocessing/tokenization, embeddings, exact top-K, image/text combination. Implemented in ai/ and export tooling.\\
-Face enrollment and search & Vong Chi Van & SCRFD/MobileFaceNet integration, alignment, references, distinct-person matching, versioned caches. Implemented in ai/ and repositories.\\
-Vietnamese OCR & Le Dat Phuc An & Bundled recognition, accent folding, FTS4, text reader, composing-input preservation. Implemented in OCR/data/UI components.\\
-Background indexing & Tran Canh Anh Tuan & Incremental worker, scheduling, and consistency protection. Implemented in worker/ and repositories.\\
-Report and presentation & Pham Nguyen Minh Quan & Report source and demonstration protocol prepared. Final artifact review and presentation delivery remain pending.\\
-Testing and validation & All four members (equal share) & Unit and instrumentation tests for retrieval, Room persistence, OCR, indexing, and media operations; build/lint checks and device regression testing. Existing tests and audit results provide the baseline; record new outcomes and defects.\\
-\end{reporttable}
 
 \end{document}
