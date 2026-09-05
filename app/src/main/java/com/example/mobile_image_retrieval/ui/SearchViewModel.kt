@@ -8,6 +8,9 @@ import com.example.mobile_image_retrieval.AppContainer
 import com.example.mobile_image_retrieval.ai.MobileClipAssets
 import com.example.mobile_image_retrieval.ai.ModelUnavailableException
 import com.example.mobile_image_retrieval.ai.FaceModelContract
+import com.example.mobile_image_retrieval.ai.OcrModelContract
+import com.example.mobile_image_retrieval.ai.VietnameseText
+import com.example.mobile_image_retrieval.domain.model.SearchMode
 import com.example.mobile_image_retrieval.data.db.SearchHistoryEntity
 import com.example.mobile_image_retrieval.data.db.IndexingStateEntity
 import com.example.mobile_image_retrieval.data.db.SavedPerson
@@ -39,6 +42,7 @@ data class SearchUiState(
     val personSaveVersion: Long = 0,
     val photoAccess: PhotoAccess = PhotoAccess.DENIED,
     val indexingStatus: IndexingStatus = IndexingStatus.Idle,
+    val ocrIndexingStatus: IndexingStatus = IndexingStatus.Idle,
     val isSearching: Boolean = false,
     val results: List<SearchResult> = emptyList(),
     val filters: SearchFilters = SearchFilters(),
@@ -52,6 +56,7 @@ data class SearchUiState(
     val libraryTotal: Int = 0,
     val indexedCount: Int = 0,
     val faceIndexedCount: Int = 0,
+    val textIndexedCount: Int = 0,
     val error: UiError? = null,
 )
 
@@ -72,10 +77,27 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
     private var libraryRefreshJob: Job? = null
     private val modelUnavailable = MobileClipAssets.unavailableReason(container.applicationContext)
     private var workerState: IndexingStateEntity? = null
+    private var ocrWorkerState: IndexingStateEntity? = null
+    private var textCountLoaded = false
+    private var imageCountLoaded = false
+    private var faceCountLoaded = false
 
     init {
         viewModelScope.launch {
+            container.database.photoTextDao().observeIndexedCount(OcrModelContract.VERSION).collectLatest { count ->
+                textCountLoaded = true
+                mutableState.update { current -> current.copy(textIndexedCount = count, ocrIndexingStatus = ocrStatus(count, current.libraryTotal)) }
+            }
+        }
+        viewModelScope.launch {
+            container.database.indexingStateDao().observe(2).collectLatest { indexing ->
+                ocrWorkerState = indexing
+                mutableState.update { current -> current.copy(ocrIndexingStatus = ocrStatus(current.textIndexedCount, current.libraryTotal)) }
+            }
+        }
+        viewModelScope.launch {
             container.database.faceEmbeddingDao().observeIndexedCount(FaceModelContract.VERSION).collectLatest { count ->
+                faceCountLoaded = true
                 mutableState.update { current -> current.copy(faceIndexedCount = count, indexingStatus = indexingStatus(current.indexedCount, current.libraryTotal, count)) }
             }
         }
@@ -93,6 +115,7 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         }
         viewModelScope.launch {
             container.database.mediaEmbeddingDao().observeCount().collectLatest { count ->
+                imageCountLoaded = true
                 mutableState.update { current ->
                     current.copy(indexedCount = count, indexingStatus = indexingStatus(count, current.libraryTotal))
                 }
@@ -101,7 +124,15 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun updateQuery(query: String) = mutableState.update { it.copy(query = query) }
-    fun selectSearchImage(uri: String?) = mutableState.update { it.copy(selectedImageUri = uri) }
+    fun selectSearchImage(uri: String?) = mutableState.update {
+        it.copy(selectedImageUri = uri, filters = if (uri != null && it.filters.searchMode == SearchMode.OCR) it.filters.copy(searchMode = SearchMode.NORMAL) else it.filters)
+    }
+
+    fun updateSearchMode(mode: SearchMode) = mutableState.update {
+        it.copy(filters = it.filters.copy(searchMode = mode))
+    }
+
+    suspend fun readPhotoText(item: MediaItem) = container.photoTextRepository.read(item)
 
     fun savePerson(name: String, uri: String, existingId: Long? = null) {
         if (state.value.isSavingPerson) return
@@ -168,10 +199,11 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
                         isLibraryLoading = false,
                         libraryError = null,
                         indexingStatus = indexingStatus(current.indexedCount, photos.size),
+                        ocrIndexingStatus = ocrStatus(current.textIndexedCount, photos.size),
                         error = null,
                     )
                 }
-                if (modelUnavailable == null) container.indexScheduler.enqueue()
+                container.indexScheduler.enqueue()
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: SecurityException) {
@@ -189,15 +221,15 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
     fun submitSearch(
         query: String = state.value.query,
         filters: SearchFilters = state.value.filters,
-        imageUri: String? = state.value.selectedImageUri,
+        imageUri: String? = if (filters.searchMode == SearchMode.OCR) null else state.value.selectedImageUri,
     ) {
-        val clean = query.trim()
+        val clean = VietnameseText.normalize(query.trim())
         if (clean.isEmpty() && imageUri == null) return
         if (state.value.photoAccess == PhotoAccess.DENIED) {
             mutableState.update { it.copy(error = UiError.Permission("Photo access is required to search your library.")) }
             return
         }
-        if (modelUnavailable != null) {
+        if (modelUnavailable != null && filters.searchMode != SearchMode.OCR) {
             mutableState.update { it.copy(error = UiError.ModelUnavailable(modelUnavailable)) }
             mutableEvents.tryEmit(SearchEvent.Failed(modelUnavailable))
             return
@@ -212,7 +244,7 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
                 if (generation != searchGeneration) return@launch
                 Log.d(TAG, "embedding=${execution.queryEmbeddingMillis}ms scan=${execution.vectorScanMillis}ms total=${execution.totalMillis}ms")
                 mutableState.update { it.copy(results = execution.results, isSearching = false) }
-                if (imageUri == null) container.searchRepository.saveHistory(clean, execution.results.firstOrNull()?.media?.uri)
+                if (imageUri == null) container.searchRepository.saveHistory(clean, execution.results.firstOrNull()?.media?.uri, filters.searchMode)
                 if (generation != searchGeneration) return@launch
                 mutableEvents.emit(SearchEvent.ResultsReady)
             } catch (_: kotlinx.coroutines.CancellationException) {
@@ -234,7 +266,7 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
     fun applyFilters(filters: SearchFilters) {
         mutableState.update { it.copy(filters = filters) }
         if (state.value.resultQuery.isNotBlank() || state.value.resultImageUri != null) {
-            submitSearch(state.value.resultQuery, filters, state.value.resultImageUri)
+            submitSearch(state.value.resultQuery, filters, if (filters.searchMode == SearchMode.OCR) null else state.value.resultImageUri)
         }
     }
 
@@ -257,11 +289,18 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     private fun indexingStatus(indexed: Int, total: Int, faces: Int = state.value.faceIndexedCount): IndexingStatus = when {
+        !imageCountLoaded || !faceCountLoaded -> IndexingStatus.Idle
         modelUnavailable != null -> IndexingStatus.Unavailable(modelUnavailable)
         workerState?.status == "UNAVAILABLE" -> IndexingStatus.Unavailable(workerState?.error ?: "Model unavailable")
-        workerState?.status == "INTERRUPTED" && workerState?.total == total -> IndexingStatus.Interrupted(minOf(indexed, faces), total)
         total == 0 || minOf(indexed, faces) >= total -> IndexingStatus.Idle
+        workerState?.status == "INTERRUPTED" && workerState?.total == total -> IndexingStatus.Interrupted(minOf(indexed, faces), total)
         else -> IndexingStatus.Running(minOf(indexed, faces), total)
+    }
+
+    private fun ocrStatus(indexed: Int, total: Int): IndexingStatus = when {
+        !textCountLoaded || total == 0 || indexed >= total -> IndexingStatus.Idle
+        ocrWorkerState?.status == "INTERRUPTED" && ocrWorkerState?.total == total -> IndexingStatus.Interrupted(indexed, total)
+        else -> IndexingStatus.Running(indexed, total)
     }
 
     private suspend fun failSearch(message: String) {

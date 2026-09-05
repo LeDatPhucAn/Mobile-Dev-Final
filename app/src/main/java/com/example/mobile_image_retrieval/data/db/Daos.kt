@@ -5,20 +5,42 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface MediaEmbeddingDao {
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(entity: MediaEmbeddingEntity)
+    @Upsert
+    suspend fun write(entity: MediaEmbeddingEntity)
 
-    @Query("SELECT mediaId, dateModified FROM media_embeddings")
+    @Transaction
+    suspend fun upsert(entity: MediaEmbeddingEntity) {
+        // Filling an embedding must retain already scanned OCR/faces for this photo revision.
+        deleteChanged(entity.mediaId, entity.dateModified)
+        write(entity)
+    }
+
+    @Query("DELETE FROM media_embeddings WHERE mediaId = :id AND dateModified != :modified")
+    suspend fun deleteChanged(id: Long, modified: Long)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMetadata(entity: MediaEmbeddingEntity)
+
+    @Transaction
+    suspend fun ensureMetadata(entity: MediaEmbeddingEntity) {
+        require(entity.embeddingDimension == 0 && entity.embedding.isEmpty())
+        if ((byId(entity.mediaId)?.dateModified ?: Long.MIN_VALUE) > entity.dateModified) return
+        deleteChanged(entity.mediaId, entity.dateModified)
+        insertMetadata(entity)
+    }
+
+    @Query("SELECT mediaId, dateModified, embeddingDimension FROM media_embeddings")
     suspend fun indexStates(): List<MediaIndexState>
 
-    @Query("SELECT COUNT(*) FROM media_embeddings")
+    @Query("SELECT COUNT(*) FROM media_embeddings WHERE embeddingDimension > 0")
     fun observeCount(): Flow<Int>
 
-    @Query("SELECT COUNT(*) FROM media_embeddings")
+    @Query("SELECT COUNT(*) FROM media_embeddings WHERE embeddingDimension > 0")
     suspend fun count(): Int
 
     @Query("SELECT * FROM media_embeddings WHERE mediaId = :mediaId")
@@ -35,6 +57,7 @@ interface MediaEmbeddingDao {
         WHERE (:startMillis IS NULL OR COALESCE(dateTaken, dateAdded * 1000) >= :startMillis)
           AND (:endExclusiveMillis IS NULL OR COALESCE(dateTaken, dateAdded * 1000) < :endExclusiveMillis)
           AND (:mediaType IS NULL OR mediaType = :mediaType)
+          AND (:includeMetadata OR embeddingDimension > 0)
         ORDER BY mediaId
         LIMIT :limit OFFSET :offset
         """
@@ -45,6 +68,7 @@ interface MediaEmbeddingDao {
         mediaType: String?,
         limit: Int,
         offset: Int,
+        includeMetadata: Boolean = false,
     ): List<SearchCandidate>
 }
 
@@ -74,8 +98,8 @@ interface SearchHistoryDao {
 
 @Dao
 interface IndexingStateDao {
-    @Query("SELECT * FROM indexing_state WHERE id = 1")
-    fun observe(): Flow<IndexingStateEntity?>
+    @Query("SELECT * FROM indexing_state WHERE id = :id")
+    fun observe(id: Int = 1): Flow<IndexingStateEntity?>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(state: IndexingStateEntity)

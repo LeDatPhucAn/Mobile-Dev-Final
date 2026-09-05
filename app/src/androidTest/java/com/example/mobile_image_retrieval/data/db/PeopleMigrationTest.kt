@@ -11,6 +11,29 @@ class PeopleMigrationTest {
         InstrumentationRegistry.getInstrumentation(), PhotoSearchDatabase::class.java,
     )
 
+    @Test fun ocrMigrationPreservesHistoryPeopleAndCreatesWorkingFts() {
+        val name = "ocr-migration-test"
+        helper.createDatabase(name, 3).apply {
+            execSQL("INSERT INTO search_history (id, query, timestamp, topResultUri) VALUES (1, 'hóa đơn', 100, NULL)")
+            execSQL("INSERT INTO people (name, handle, thumbnail, embedding, embeddingDimension, embeddingModel) VALUES ('Thảo', 'thảo', X'01', X'0000803F', 1, 'test')")
+            execSQL("INSERT INTO media_embeddings (mediaId, uri, mediaType, dateModified, embedding, embeddingDimension, indexedAt) VALUES (1, 'content://photos/1', 'IMAGE', 10, X'0000803F', 1, 100)")
+            close()
+        }
+        helper.runMigrationsAndValidate(name, 4, true, PhotoSearchDatabase.MIGRATION_3_4).use { db ->
+            db.execSQL("PRAGMA foreign_keys=ON")
+            db.query("SELECT query, searchMode FROM search_history").use {
+                it.moveToFirst(); assertEquals("hóa đơn", it.getString(0)); assertEquals("HYBRID", it.getString(1))
+            }
+            db.query("SELECT handle FROM people").use { it.moveToFirst(); assertEquals("thảo", it.getString(0)) }
+            db.execSQL("INSERT INTO photo_text VALUES (1, 'hóa đơn', 'hoa don', 10, 'test', 0)")
+            db.query("SELECT rowid FROM photo_text_fts WHERE photo_text_fts MATCH 'hoa'").use { assertEquals(1, it.count) }
+            db.execSQL("UPDATE photo_text SET searchText = 'tin nhan' WHERE rowid = 1")
+            db.query("SELECT rowid FROM photo_text_fts WHERE photo_text_fts MATCH 'hoa'").use { assertEquals(0, it.count) }
+            db.execSQL("DELETE FROM media_embeddings WHERE mediaId = 1")
+            db.query("SELECT rowid FROM photo_text_fts WHERE photo_text_fts MATCH 'tin'").use { assertEquals(0, it.count) }
+        }
+    }
+
     @Test fun migrationPreservesHistoryAndIndex() {
         val name = "people-migration-test"
         helper.createDatabase(name, 1).apply {

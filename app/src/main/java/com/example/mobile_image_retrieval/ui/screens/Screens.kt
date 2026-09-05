@@ -37,6 +37,10 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import com.example.mobile_image_retrieval.domain.model.SearchMode
+import com.example.mobile_image_retrieval.ai.VietnameseText
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePickerDialog
@@ -98,8 +102,12 @@ fun SearchHomeScreen(
     onPhoto: (Long) -> Unit,
     onSelectImage: (String?) -> Unit = {},
     onOpenPeople: () -> Unit = {},
-    onHistorySearch: (String) -> Unit = onSearch,
+    onHistorySearch: (String, SearchMode) -> Unit = { query, _ -> onSearch(query) },
+    onModeChanged: (SearchMode) -> Unit = {},
+    onRefresh: () -> Unit = {},
 ) {
+    val waitingForOcr = state.filters.searchMode == SearchMode.NORMAL &&
+        state.indexingStatus is IndexingStatus.Running && state.ocrIndexingStatus is IndexingStatus.Running
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         uri?.let { onSelectImage(it.toString()) }
     }
@@ -128,20 +136,28 @@ fun SearchHomeScreen(
             }
         }
         item {
-            OutlinedTextField(
+            TabRow(selectedTabIndex = state.filters.searchMode.ordinal) {
+                SearchMode.entries.forEach { mode ->
+                    Tab(selected = state.filters.searchMode == mode, onClick = { onModeChanged(mode) }, text = { Text(searchModeLabel(mode)) })
+                }
+            }
+            VietnameseTextField(
                 value = state.query,
                 onValueChange = onQueryChanged,
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Try @alex at the beach...") },
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                placeholder = { Text(if (state.filters.searchMode == SearchMode.OCR) "hóa đơn, tin nhắn, 70.000…" else "Try @thảo at the beach…") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
-                trailingIcon = { Icon(Icons.Default.AutoAwesome, "Semantic search") },
                 singleLine = true,
                 shape = RoundedCornerShape(18.dp),
+                onSearch = { onSearch(state.query) },
             )
+            Text(if (state.filters.searchMode == SearchMode.OCR)
+                "Find words or amounts in bills and screenshots, with or without Vietnamese accents."
+            else "Describe a photo, choose an image, or combine both. Visual descriptions work best in English.", style = MaterialTheme.typography.bodySmall)
             val mention = Regex("(?:^|\\s)@([\\p{L}\\p{M}\\p{N}_]*)$").find(state.query)
             if (mention != null) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    state.people.filter { it.handle.startsWith(mention.groupValues[1], ignoreCase = true) }.take(6).forEach { person ->
+                    state.people.filter { it.handle.startsWith(VietnameseText.normalize(mention.groupValues[1]), ignoreCase = true) }.take(6).forEach { person ->
                         AssistChip(onClick = {
                             val start = state.query.lastIndexOf('@')
                             onQueryChanged(state.query.take(start) + "@${person.handle} ")
@@ -149,7 +165,7 @@ fun SearchHomeScreen(
                     }
                 }
             }
-            state.selectedImageUri?.let { uri ->
+            if (state.filters.searchMode == SearchMode.NORMAL) state.selectedImageUri?.let { uri ->
                 Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     PhotoThumbnail(uri, Modifier.size(64.dp), "Search reference")
                     Text("Find similar photos", Modifier.weight(1f).padding(horizontal = 12.dp))
@@ -157,7 +173,7 @@ fun SearchHomeScreen(
                 }
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(
+                if (state.filters.searchMode == SearchMode.NORMAL) AssistChip(
                     onClick = { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                     label = { Text(if (state.selectedImageUri == null) "Search by image" else "Change image") },
                     leadingIcon = { Icon(Icons.Default.PhotoLibrary, null) },
@@ -170,13 +186,20 @@ fun SearchHomeScreen(
             }
             Button(
                 onClick = { onSearch(state.query) },
-                enabled = state.query.isNotBlank() || state.selectedImageUri != null,
+                enabled = state.query.isNotBlank() || (state.filters.searchMode == SearchMode.NORMAL && state.selectedImageUri != null),
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 shape = RoundedCornerShape(14.dp),
             ) { Text("Search") }
         }
-        when (val indexing = state.indexingStatus) {
-            is IndexingStatus.Running -> item { IndexingCard(indexing) }
+        when (val indexing = if (state.filters.searchMode == SearchMode.OCR || waitingForOcr) state.ocrIndexingStatus else state.indexingStatus) {
+            is IndexingStatus.Running -> item {
+                IndexingCard(indexing, when {
+                    waitingForOcr -> "Scanning text before photos and faces"
+                    state.filters.searchMode == SearchMode.OCR -> "Scanning text"
+                    else -> "Indexing photos and faces"
+                })
+                if (waitingForOcr) Text("Visual indexing is queued. Previously indexed photos remain searchable.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+            }
             is IndexingStatus.Unavailable -> item {
                 Surface(color = Color(0xFFFFF5E6), shape = RoundedCornerShape(14.dp)) {
                     Column(Modifier.padding(14.dp)) {
@@ -196,9 +219,15 @@ fun SearchHomeScreen(
             else -> Unit
         }
         item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (state.filters.searchMode == SearchMode.OCR || waitingForOcr) "Text saved: ${state.textIndexedCount} / ${state.libraryTotal} photos"
+                    else "Photos indexed: ${state.indexedCount} / ${state.libraryTotal}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = onRefresh) { Text("Refresh") }
+            }
             Text("Try searching", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Suggestions.forEach { suggestion -> AssistChip(onClick = { onSearch(suggestion) }, label = { Text(suggestion) }) }
+                val suggestions = if (state.filters.searchMode == SearchMode.OCR) listOf("hóa đơn", "tổng cộng", "cà phê", "hẹn gặp") else Suggestions
+                suggestions.forEach { suggestion -> AssistChip(onClick = { onSearch(suggestion) }, label = { Text(suggestion) }) }
             }
         }
         if (state.history.isNotEmpty()) {
@@ -208,7 +237,9 @@ fun SearchHomeScreen(
                     TextButton(onClick = onClearHistory) { Text("Clear") }
                 }
             }
-            items(state.history, key = { it.id }) { history -> HistoryRow(history) { onHistorySearch(history.query) } }
+            items(state.history, key = { it.id }) { history -> HistoryRow(history) {
+                onHistorySearch(history.query, SearchMode.fromStored(history.searchMode))
+            } }
         }
         if (state.recentPhotos.isNotEmpty()) {
             item { Text("Your library", fontWeight = FontWeight.SemiBold, fontSize = 18.sp) }
@@ -249,11 +280,12 @@ internal fun PermissionScreen(onRequestPermission: () -> Unit) {
 }
 
 @Composable
-private fun IndexingCard(status: IndexingStatus.Running) {
+private fun IndexingCard(status: IndexingStatus.Running, title: String) {
     Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Indexing your library", fontWeight = FontWeight.SemiBold)
-            Text("${status.indexed} / ${status.total} photos", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, fontWeight = FontWeight.SemiBold)
+            Text("${status.indexed} saved · ${(status.total - status.indexed).coerceAtLeast(0)} remaining", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Progress is saved automatically. Reopening resumes the remaining photos.", style = MaterialTheme.typography.bodySmall)
             LinearProgressIndicator(
                 progress = { if (status.total == 0) 0f else status.indexed.toFloat() / status.total },
                 modifier = Modifier.fillMaxWidth(),
@@ -313,12 +345,15 @@ fun ResultsScreen(
                 }
             }
             Text("${state.results.size} results", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(8.dp))
+            if (state.filters.searchMode != SearchMode.NORMAL && state.textIndexedCount < state.libraryTotal) {
+                Text("Text scanning: ${state.textIndexedCount} / ${state.libraryTotal} photos. Results may be incomplete.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(8.dp))
+            }
             if (state.resultQuery.contains('@') && state.faceIndexedCount < state.libraryTotal) {
                 Text("Face indexing: ${state.faceIndexedCount} / ${state.libraryTotal} photos. Results may be incomplete.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(8.dp))
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 AssistChip(onClick = onOpenFilters, label = { Text(timeRangeLabel(state.filters.timeRange) + "  ▾") })
-                if (state.filters != SearchFilters()) TextButton(onClick = onClearFilters) { Text("Clear") }
+                if (state.filters != SearchFilters(searchMode = state.filters.searchMode)) TextButton(onClick = onClearFilters) { Text("Clear") }
             }
             if (state.results.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -337,6 +372,9 @@ fun ResultsScreen(
                 items(state.results, key = { it.media.mediaId }) { result ->
                     Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(4.dp)).clickable { onPhoto(result.media.mediaId) }) {
                         AsyncImage(result.media.uri, result.media.displayName, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        if (result.textMatch) Surface(Modifier.align(Alignment.BottomStart), color = MaterialTheme.colorScheme.primaryContainer) {
+                            Text("Text match", Modifier.padding(4.dp), style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
             }
@@ -353,7 +391,7 @@ fun FiltersScreen(initial: SearchFilters, onClose: () -> Unit, onApply: (SearchF
             TopAppBar(
                 title = { Text("Filters", fontWeight = FontWeight.Bold) },
                 navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close") } },
-                actions = { TextButton(onClick = { filters = SearchFilters() }) { Text("Reset") } },
+                actions = { TextButton(onClick = { filters = SearchFilters(searchMode = initial.searchMode) }) { Text("Reset") } },
             )
         },
         bottomBar = { Button(onClick = { onApply(filters) }, Modifier.fillMaxWidth().padding(20.dp).height(52.dp), shape = RoundedCornerShape(14.dp)) { Text("Apply filters") } },
@@ -413,6 +451,10 @@ private fun timeRangeLabel(range: TimeRange) = when (range) {
     TimeRange.THIS_WEEK -> "This week"; TimeRange.THIS_MONTH -> "This month"; TimeRange.CUSTOM -> "Custom range"
 }
 private fun sortLabel(sort: ResultSort) = when (sort) { ResultSort.MOST_RELEVANT -> "Most relevant"; ResultSort.NEWEST_FIRST -> "Newest first"; ResultSort.OLDEST_FIRST -> "Oldest first" }
+private fun searchModeLabel(mode: SearchMode) = when (mode) {
+    SearchMode.NORMAL -> "Normal query"
+    SearchMode.OCR -> "OCR search"
+}
 private val PreviewMedia = MediaItem(1, "", MediaType.IMAGE, "Beach.jpg", 1_715_760_000_000, 0, 0, 4032, 3024, "image/jpeg", "camera", "Camera")
 private val PreviewState = SearchUiState(photoAccess = PhotoAccess.FULL, query = "me at the beach", indexingStatus = IndexingStatus.Running(2431, 8912), history = listOf(SearchHistoryEntity(1, "sunset", System.currentTimeMillis(), null)), results = listOf(SearchResult(PreviewMedia, .42f)), resultQuery = "me at the beach", albums = listOf(Album("all", "All Photos", 8912, null)))
 

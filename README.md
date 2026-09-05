@@ -2,6 +2,41 @@
 
 Private, on-device semantic search over the user's Android photo library. The app is Kotlin/Jetpack Compose, targets Android 10+ (`minSdk 29`), never uploads media, and does not request `INTERNET` permission.
 
+## Vietnamese input and OCR
+
+Search and saved-person fields preserve keyboard composition for Vietnamese Telex/VNI input
+and hint Vietnamese/English locales to the keyboard. Select a Vietnamese keyboard on the device
+to type accents. Text is normalized to Unicode NFC on submission, not while composing.
+
+- **Normal query** searches visual content using a text prompt, reference image, or both.
+  Saved `@people` still filter by face identity. OCR matches do not affect normal-query ranking.
+- **OCR search** finds all entered words/numbers in bills and message screenshots without
+  running the CLIP text encoder. Try `hóa đơn`, `hoa don`, `70.000`, or `@thảo hóa đơn`.
+  Accents and punctuation do not need to match. This is word matching, not translation or fuzzy matching.
+  English descriptions remain best for visual concepts in Normal query; Vietnamese OCR
+  does not turn CLIP into a Vietnamese semantic model.
+- Open a photo and choose **Read text** to view, select, and copy the original text with accents.
+
+The bundled ML Kit Latin OCR model supports Vietnamese and is available offline immediately;
+see [OCR model details](app/src/main/assets/models/OCR_MODELS.md). It is packaged by its Android
+dependency, so no additional manual model download is required.
+
+Library indexing scans OCR first, then performs pending CLIP and face inference. OCR results
+are searchable as soon as each photo is scanned, even before its visual embedding exists.
+The two tabs report separate progress. Unchanged text scans (including empty detections) are
+reused. The first full-library scan still decodes up to 2048 pixels per photo to retain small print;
+image decoding and text-recognition timings are logged separately under `PhotoTextIndex`.
+Normal indexing follows the OCR pass; this prioritizes making bill/message search ready first. **Refresh**
+retries pending photos. Opening the text reader can also recognize a photo on demand.
+
+Room schema 4 adds `photo_text` (original text, folded text, modification/model version and empty
+scan markers) and `photo_text_fts` (FTS4 word index) in the private `photo-search.db` database.
+OCR text is not embedded. Searches reuse this index, while image and face vectors retain their
+existing tables. Removing/replacing a photo cascades its OCR data. Existing people, face vectors,
+image vectors and history survive migration; history remembers the search tab, including legacy
+mode names. Rows with `embeddingDimension = 0` hold metadata pending visual indexing and are
+excluded from normal search/counts. Filling an embedding preserves OCR for the same photo revision.
+
 ## Architecture
 
 The app uses a small MVVM/repository structure:
@@ -127,6 +162,13 @@ Denied, partial, and revoked access are handled in UI. Delete uses the MediaStor
 Albums load directly from MediaStore independently of semantic indexing. The library refreshes on resume, when opening Albums, and when MediaStore reports changes while the app is visible. Albums distinguish loading, read failures, and an empty library, with refresh and photo-access controls. Partial access can be expanded from either the search or album screen.
 
 ## Build and tests
+
+Connected instrumentation tests keep the installed app after completion via
+`android.injected.androidTest.leaveApksInstalledAfterRun=true`. Without this setting, Gradle's
+test cleanup can uninstall the app and erase `photo-search.db`, causing a full scan on the next
+installation. Prefer a dedicated test emulator; update the development installation in place
+(Android Studio Run or `adb install -r`) to retain its index. Uninstalling or clearing app data
+still removes the local index.
 
 Open the existing root in a current Android Studio with Android SDK 36 installed, then run:
 

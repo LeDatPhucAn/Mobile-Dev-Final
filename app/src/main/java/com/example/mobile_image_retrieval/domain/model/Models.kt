@@ -19,6 +19,14 @@ data class MediaItem(
 
 enum class TimeRange { ANY_TIME, TODAY, YESTERDAY, THIS_WEEK, THIS_MONTH, CUSTOM }
 enum class ResultSort { MOST_RELEVANT, NEWEST_FIRST, OLDEST_FIRST }
+enum class SearchMode {
+    NORMAL, OCR;
+
+    companion object {
+        // Preserve searches saved by the previous three-mode UI.
+        fun fromStored(value: String) = if (value == "OCR" || value == "TEXT_IN_PHOTOS") OCR else NORMAL
+    }
+}
 
 data class SearchFilters(
     val timeRange: TimeRange = TimeRange.ANY_TIME,
@@ -26,9 +34,10 @@ data class SearchFilters(
     val mediaType: MediaType? = null,
     val customStartMillis: Long? = null,
     val customEndExclusiveMillis: Long? = null,
+    val searchMode: SearchMode = SearchMode.NORMAL,
 )
 
-data class SearchResult(val media: MediaItem, val rawSimilarity: Float)
+data class SearchResult(val media: MediaItem, val rawSimilarity: Float, val textMatch: Boolean = false)
 
 data class Album(
     val id: String,

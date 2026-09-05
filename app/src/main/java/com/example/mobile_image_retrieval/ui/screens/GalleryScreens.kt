@@ -74,6 +74,7 @@ fun PhotoViewerScreen(
     onDelete: (MediaItem) -> Unit,
     scoreFor: (Long) -> Float? = { null },
     onFindSimilar: ((MediaItem) -> Unit)? = null,
+    onReadText: ((MediaItem) -> Unit)? = null,
 ) {
     val initialPage = remember(photos, initialMediaId) {
         photos.indexOfFirst { it.mediaId == initialMediaId }
@@ -162,6 +163,9 @@ fun PhotoViewerScreen(
                         TextButton(onClick = { search(media) }, modifier = Modifier.fillMaxWidth()) {
                             Text("Find similar photos")
                         }
+                    }
+                    onReadText?.let { read ->
+                        TextButton(onClick = { read(media) }, modifier = Modifier.fillMaxWidth()) { Text("Read text") }
                     }
                 }
             }

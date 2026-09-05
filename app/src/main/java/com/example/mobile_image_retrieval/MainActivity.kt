@@ -50,6 +50,8 @@ import androidx.navigation.navArgument
 import com.example.mobile_image_retrieval.domain.model.AlbumCatalog
 import com.example.mobile_image_retrieval.domain.model.MediaItem
 import com.example.mobile_image_retrieval.domain.model.SearchFilters
+import com.example.mobile_image_retrieval.domain.model.SearchMode
+import com.example.mobile_image_retrieval.ui.screens.PhotoTextScreen
 import com.example.mobile_image_retrieval.permissions.PhotoPermission
 import com.example.mobile_image_retrieval.permissions.PhotoAccess
 import com.example.mobile_image_retrieval.ui.SearchEvent
@@ -88,6 +90,8 @@ private object Route {
     const val FILTERS = "filters"
     const val ALBUMS = "albums"
     const val PEOPLE = "people"
+    const val PHOTO_TEXT = "text/{mediaId}"
+    fun photoText(mediaId: Long) = "text/$mediaId"
     const val ALBUM = "album/{albumId}"
     const val RESULT_VIEWER = "viewer/results/{mediaId}"
     const val LIBRARY_VIEWER = "viewer/library/{mediaId}"
@@ -254,7 +258,9 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                     { navController.navigate(Route.libraryViewer(it)) },
                     onSelectImage = viewModel::selectSearchImage,
                     onOpenPeople = { navController.navigate(Route.PEOPLE) { launchSingleTop = true } },
-                    onHistorySearch = { viewModel.submitSearch(it, imageUri = null) },
+                    onHistorySearch = { query, mode -> viewModel.submitSearch(query, state.filters.copy(searchMode = mode), imageUri = null) },
+                    onModeChanged = viewModel::updateSearchMode,
+                    onRefresh = { viewModel.refreshLibrary() },
                 )
             }
             composable(Route.SEARCHING) {
@@ -264,7 +270,7 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
             composable(Route.RESULTS) {
                 ResultsScreen(
                     state, { navController.popBackStack(Route.HOME, false) }, { navController.navigate(Route.FILTERS) },
-                    { viewModel.applyFilters(SearchFilters()) }, { navController.navigate(Route.resultViewer(it)) },
+                    { viewModel.applyFilters(SearchFilters(searchMode = state.filters.searchMode)) }, { navController.navigate(Route.resultViewer(it)) },
                 )
             }
             composable(Route.FILTERS) {
@@ -290,10 +296,15 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                     state = state,
                     onSave = viewModel::savePerson,
                     onRemove = { viewModel.removePerson(it) },
-                    onSearch = { viewModel.submitSearch(it, imageUri = null) },
+                    onSearch = { viewModel.submitSearch(it, state.filters.copy(searchMode = SearchMode.NORMAL), imageUri = null) },
                     onClearSaveError = viewModel::clearPersonSaveError,
                     onRefresh = { viewModel.refreshLibrary() },
                 )
+            }
+            composable(Route.PHOTO_TEXT, arguments = listOf(navArgument("mediaId") { type = NavType.LongType })) { entry ->
+                val id = entry.arguments?.getLong("mediaId")
+                PhotoTextScreen(state.libraryPhotos.firstOrNull { it.mediaId == id } ?: state.results.firstOrNull { it.media.mediaId == id }?.media,
+                    { navController.popBackStack() }, viewModel::readPhotoText)
             }
             composable(Route.ALBUM, arguments = listOf(navArgument("albumId") { type = NavType.StringType })) { entry ->
                 val albumId = Uri.decode(entry.arguments?.getString("albumId").orEmpty())
@@ -317,8 +328,9 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                     onBack = { navController.popBackStack() },
                     onShare = ::share,
                     onDelete = ::requestDelete,
-                    scoreFor = { mediaId -> state.results.firstOrNull { it.media.mediaId == mediaId }?.rawSimilarity },
-                    onFindSimilar = { viewModel.submitSearch("", imageUri = it.uri) },
+                    scoreFor = { mediaId -> if (state.filters.searchMode == SearchMode.OCR) null else state.results.firstOrNull { it.media.mediaId == mediaId }?.rawSimilarity },
+                    onFindSimilar = { viewModel.submitSearch("", state.filters.copy(searchMode = SearchMode.NORMAL), imageUri = it.uri) },
+                    onReadText = { navController.navigate(Route.photoText(it.mediaId)) },
                 )
             }
             composable(Route.LIBRARY_VIEWER, arguments = listOf(navArgument("mediaId") { type = NavType.LongType })) { entry ->
@@ -328,7 +340,8 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                     onBack = { navController.popBackStack() },
                     onShare = ::share,
                     onDelete = ::requestDelete,
-                    onFindSimilar = { viewModel.submitSearch("", imageUri = it.uri) },
+                    onFindSimilar = { viewModel.submitSearch("", state.filters.copy(searchMode = SearchMode.NORMAL), imageUri = it.uri) },
+                    onReadText = { navController.navigate(Route.photoText(it.mediaId)) },
                 )
             }
             composable(
@@ -349,7 +362,8 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                     onBack = { navController.popBackStack() },
                     onShare = ::share,
                     onDelete = ::requestDelete,
-                    onFindSimilar = { viewModel.submitSearch("", imageUri = it.uri) },
+                    onFindSimilar = { viewModel.submitSearch("", state.filters.copy(searchMode = SearchMode.NORMAL), imageUri = it.uri) },
+                    onReadText = { navController.navigate(Route.photoText(it.mediaId)) },
                 )
             }
         }
