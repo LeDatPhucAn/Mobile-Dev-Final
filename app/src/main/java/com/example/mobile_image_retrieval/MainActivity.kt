@@ -38,6 +38,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -49,6 +50,7 @@ import com.example.mobile_image_retrieval.domain.model.AlbumCatalog
 import com.example.mobile_image_retrieval.domain.model.MediaItem
 import com.example.mobile_image_retrieval.domain.model.SearchFilters
 import com.example.mobile_image_retrieval.permissions.PhotoPermission
+import com.example.mobile_image_retrieval.permissions.PhotoAccess
 import com.example.mobile_image_retrieval.ui.SearchEvent
 import com.example.mobile_image_retrieval.ui.SearchViewModel
 import com.example.mobile_image_retrieval.ui.screens.AlbumPhotosScreen
@@ -113,6 +115,13 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(lifecycleOwner, state.photoAccess) {
+        if (state.photoAccess != PhotoAccess.DENIED) {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                viewModel.libraryChanges.collect { viewModel.refreshLibrary().join() }
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -253,7 +262,16 @@ private fun PhotoSearchApp(viewModel: SearchViewModel) {
                 }
             }
             composable(Route.ALBUMS) {
-                AlbumsScreen(state.albums) { navController.navigate(Route.album(it)) }
+                LaunchedEffect(Unit) { viewModel.updatePhotoAccess(PhotoPermission.access(context)) }
+                AlbumsScreen(
+                    albums = state.albums,
+                    onAlbum = { navController.navigate(Route.album(it)) },
+                    photoAccess = state.photoAccess,
+                    isLoading = state.isLibraryLoading,
+                    error = state.libraryError,
+                    onRefresh = { viewModel.updatePhotoAccess(PhotoPermission.access(context)) },
+                    onRequestPermission = { permissionLauncher.launch(PhotoPermission.requestedPermissions()) },
+                )
             }
             composable(Route.ALBUM, arguments = listOf(navArgument("albumId") { type = NavType.StringType })) { entry ->
                 val albumId = Uri.decode(entry.arguments?.getString("albumId").orEmpty())

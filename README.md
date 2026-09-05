@@ -83,7 +83,7 @@ The config is generated alongside the graphs and is the runtime contract. Its to
 }
 ```
 
-This excerpt omits additional required fields; `mobileclip2_s0_config.json` is the complete schema. `MobileClipModelConfig` validates graph shapes/types, preprocessing, tokenizer metadata, and generated token-ID vectors. `MobileClipPreprocessor` performs the declared shortest-edge bicubic resize and center crop, and `MobileClipTokenizer` implements the declared OpenCLIP byte-BPE pipeline. Graph input/output names are checked against ONNX Runtime before inference. Missing or inconsistent assets produce a visible model-unavailable state; no random vector, MobileNet, or alternate CLIP fallback exists.
+This excerpt omits additional required fields; `mobileclip2_s0_config.json` is the complete schema. `MobileClipModelConfig` validates graph shapes/types, preprocessing, tokenizer metadata, and generated token-ID vectors. `MobileClipPreprocessor` performs the declared shortest-edge bicubic resize and center crop, and `MobileClipTokenizer` implements the declared OpenCLIP byte-BPE pipeline. Graph inputs and embedding outputs are checked against ONNX Runtime before inference. If an export renamed the configured output, the runtime accepts only a unique Float32 output with shape `[1 or dynamic batch, 512]`; ambiguous or incompatible outputs report the available names and shapes. Missing or inconsistent assets produce a visible error; no random vector, MobileNet, or alternate CLIP fallback exists.
 
 The exported graph contract is strict: image input is Float32 NCHW and text input is Int64 token IDs with no attention-mask input. Both outputs are Float32 512-D embeddings.
 
@@ -104,6 +104,8 @@ Search history is another Room table. Insertions trim it to the latest 100 rows;
 
 Denied, partial, and revoked access are handled in UI. Delete uses the MediaStore system confirmation flow where required. The app contains no ads, analytics, telemetry, cloud inference, remote database, or `INTERNET` permission. Android backup is disabled for the local index and search history.
 
+Albums load directly from MediaStore independently of semantic indexing. The library refreshes on resume, when opening Albums, and when MediaStore reports changes while the app is visible. Albums distinguish loading, read failures, and an empty library, with refresh and photo-access controls. Partial access can be expanded from either the search or album screen.
+
 ## Build and tests
 
 Open the existing root in a current Android Studio with Android SDK 36 installed, then run:
@@ -123,7 +125,7 @@ For a real phone: install the debug APK, grant all or selected photo access, con
 
 - The large MobileCLIP2-S0 ONNX graphs are intentionally gitignored. A fresh clone requires the two exporter-validated graph files before semantic indexing/search is available; the generated config and tokenizer assets are included.
 - V1 indexes accessible images only. The schema supports `VIDEO`, but representative video thumbnails and `READ_MEDIA_VIDEO` permission are not enabled yet.
-- Album rows are real MediaStore buckets and system collections; album-specific browsing/editing and “add to album” are not implemented.
+- Album rows are real MediaStore buckets and system collections with photo browsing; album editing and “add to album” are not implemented.
 - Search is exact and intentionally capped to the top 100 rendered results. This is appropriate for the target 5,000–30,000 items but should be profiled on target hardware.
 - Favorite/people recognition, scene splitting, frame sampling, and temporal video search are not implemented and no fabricated smart albums are shown.
 

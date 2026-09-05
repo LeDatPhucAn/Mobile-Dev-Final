@@ -38,6 +38,8 @@ data class SearchUiState(
     val libraryPhotos: List<MediaItem> = emptyList(),
     val recentPhotos: List<MediaItem> = emptyList(),
     val albums: List<Album> = emptyList(),
+    val isLibraryLoading: Boolean = false,
+    val libraryError: String? = null,
     val librarySnapshotTimeMillis: Long = 0,
     val libraryTotal: Int = 0,
     val indexedCount: Int = 0,
@@ -55,6 +57,7 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
     val state: StateFlow<SearchUiState> = mutableState.asStateFlow()
     private val mutableEvents = MutableSharedFlow<SearchEvent>(extraBufferCapacity = 2)
     val events = mutableEvents.asSharedFlow()
+    val libraryChanges = container.mediaStoreRepository.observeChanges()
     private var searchJob: Job? = null
     private var searchGeneration = 0L
     private var libraryRefreshJob: Job? = null
@@ -87,9 +90,15 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
         if (access != PhotoAccess.DENIED) {
             refreshLibrary()
         } else {
+            cancelSearch()
             libraryRefreshJob?.cancel()
             mutableState.update {
-                it.copy(error = UiError.Permission("Photo access is required to search your library."))
+                it.copy(
+                    libraryPhotos = emptyList(), recentPhotos = emptyList(), albums = emptyList(),
+                    libraryTotal = 0, isLibraryLoading = false, libraryError = null,
+                    results = emptyList(),
+                    error = UiError.Permission("Photo access is required to search your library."),
+                )
             }
         }
     }
@@ -97,6 +106,8 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
     fun refreshLibrary(): Job {
         libraryRefreshJob?.cancel()
         return viewModelScope.launch {
+            if (state.value.photoAccess == PhotoAccess.DENIED) return@launch
+            mutableState.update { it.copy(isLibraryLoading = true, libraryError = null) }
             try {
                 val photos = container.mediaStoreRepository.queryImages()
                 val snapshotTimeMillis = System.currentTimeMillis()
@@ -108,6 +119,8 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
                         albums = albums,
                         librarySnapshotTimeMillis = snapshotTimeMillis,
                         libraryTotal = photos.size,
+                        isLibraryLoading = false,
+                        libraryError = null,
                         indexingStatus = indexingStatus(current.indexedCount, photos.size),
                         error = null,
                     )
@@ -116,9 +129,13 @@ class SearchViewModel(private val container: AppContainer) : ViewModel() {
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: SecurityException) {
-                mutableState.update { it.copy(error = UiError.Permission("Photo access was revoked.")) }
+                updatePhotoAccess(PhotoAccess.DENIED)
             } catch (error: Exception) {
-                mutableState.update { it.copy(error = UiError.Storage(error.message ?: "Could not read the photo library.")) }
+                Log.e(TAG, "Could not read the photo library", error)
+                val message = error.message ?: "Could not read the photo library."
+                mutableState.update {
+                    it.copy(isLibraryLoading = false, libraryError = message, error = UiError.Storage(message))
+                }
             }
         }.also { libraryRefreshJob = it }
     }

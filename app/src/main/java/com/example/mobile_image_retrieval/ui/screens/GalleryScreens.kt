@@ -29,8 +29,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -39,6 +42,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -57,6 +61,7 @@ import com.example.mobile_image_retrieval.ai.MatchScoreFormatter
 import com.example.mobile_image_retrieval.domain.model.Album
 import com.example.mobile_image_retrieval.domain.model.MediaItem
 import com.example.mobile_image_retrieval.domain.model.MediaType
+import com.example.mobile_image_retrieval.permissions.PhotoAccess
 import com.example.mobile_image_retrieval.ui.theme.PhotoSearchTheme
 import java.time.Instant
 import java.time.format.DateTimeFormatter
@@ -197,17 +202,59 @@ private fun UnavailablePhotoScreen(onBack: () -> Unit) {
 }
 
 @Composable
-fun AlbumsScreen(albums: List<Album>, onAlbum: (String) -> Unit) {
+fun AlbumsScreen(
+    albums: List<Album>,
+    onAlbum: (String) -> Unit,
+    photoAccess: PhotoAccess = PhotoAccess.FULL,
+    isLoading: Boolean = false,
+    error: String? = null,
+    onRefresh: () -> Unit = {},
+    onRequestPermission: () -> Unit = {},
+) {
+    if (photoAccess == PhotoAccess.DENIED) {
+        PermissionScreen(onRequestPermission)
+        return
+    }
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
-        Text(
-            "Albums",
-            fontSize = 30.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(top = 20.dp, bottom = 18.dp),
-        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Albums",
+                fontSize = 30.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f).padding(top = 20.dp, bottom = 18.dp),
+            )
+            IconButton(onClick = onRefresh, enabled = !isLoading) {
+                Icon(Icons.Default.Refresh, "Refresh albums")
+            }
+        }
+        if (photoAccess == PhotoAccess.PARTIAL) {
+            Surface(color = MaterialTheme.colorScheme.primaryContainer) {
+                Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                    Text("Only selected photos are accessible.")
+                    TextButton(onClick = onRequestPermission) { Text("Manage photo access") }
+                }
+            }
+        }
+        if (error != null) {
+            Text(error, color = MaterialTheme.colorScheme.error)
+            TextButton(onClick = onRefresh, enabled = !isLoading) { Text("Try again") }
+        }
         if (albums.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No accessible photo albums")
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator()
+                        Text("Loading photos…")
+                    } else if (error == null) {
+                        Text(if (photoAccess == PhotoAccess.PARTIAL) "No selected photos are available" else "No photos found on this device")
+                        Text("Refresh the library or check photo access.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Button(onClick = onRefresh) { Text("Refresh") }
+                        TextButton(onClick = onRequestPermission) { Text("Manage photo access") }
+                    }
+                }
             }
         } else {
             LazyColumn(
