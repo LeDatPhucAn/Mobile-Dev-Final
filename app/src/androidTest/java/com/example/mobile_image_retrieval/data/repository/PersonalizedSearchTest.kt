@@ -25,6 +25,12 @@ import com.example.mobile_image_retrieval.data.db.PersonEntity
 import com.example.mobile_image_retrieval.data.db.PhotoSearchDatabase
 import com.example.mobile_image_retrieval.domain.model.MediaType
 import com.example.mobile_image_retrieval.domain.model.SearchFilters
+import com.example.mobile_image_retrieval.domain.model.SearchMode
+import com.example.mobile_image_retrieval.ai.VietnameseText
+import com.example.mobile_image_retrieval.ai.OcrModelContract
+import com.example.mobile_image_retrieval.ai.PhotoTextRecognizer
+import kotlinx.coroutines.flow.first
+import com.example.mobile_image_retrieval.data.db.PhotoTextEntity
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -55,7 +61,7 @@ class PersonalizedSearchTest {
             }
         },
         SemanticSearchEngine(RoomSearchCandidateSource(database.mediaEmbeddingDao()), RoomFaceCandidateSource(database.faceEmbeddingDao())),
-        database.searchHistoryDao(), database.mediaEmbeddingDao(), database.personDao(), references,
+        database.searchHistoryDao(), database.mediaEmbeddingDao(), database.personDao(), references, database.photoTextDao(),
     )
 
     @Before fun setup() = runBlocking {
@@ -84,6 +90,92 @@ class PersonalizedSearchTest {
     }
 
     @After fun close() = database.close()
+
+    private suspend fun saveText(id: Long, text: String) = database.photoTextDao().upsert(
+        PhotoTextEntity(id, text, VietnameseText.searchable(text), 0, OcrModelContract.VERSION))
+
+    @Test fun vietnameseTextSearchSkipsEmbeddingAndHonorsPeople() = runBlocking {
+        saveText(0, "HÓA ĐƠN Tổng cộng 70.000 đ")
+        saveText(2, "hóa đơn 35.000 đ")
+        assertEquals("Single-word FTS should find both cached documents", setOf(0L, 2L), database.photoTextDao().matchingIds("hoa", OcrModelContract.VERSION).toSet())
+        val filters = SearchFilters(searchMode = SearchMode.OCR)
+        assertEquals(setOf(0L, 2L), repository.search("hoa don", filters).results.map { it.media.mediaId }.toSet())
+        assertEquals(listOf(0L), repository.search("hóa đơn 70.000", filters).results.map { it.media.mediaId })
+        assertEquals(listOf(2L), repository.search("@mai hóa đơn", filters).results.map { it.media.mediaId })
+        assertTrue(repository.search("không tồn tại", filters).results.isEmpty())
+        assertTrue(embeddedText.isEmpty())
+    }
+
+    @Test fun normalQueryIgnoresOcrAndOcrSearchUsesOnlyTextMatches() = runBlocking {
+        saveText(0, "hóa đơn")
+        val result = repository.search("hoa don", SearchFilters(), limit = 1).results.single()
+        assertEquals(1L, result.media.mediaId)
+        assertTrue(!result.textMatch)
+        assertEquals(0L, repository.search("hoa don", SearchFilters(searchMode = SearchMode.OCR), limit = 1).results.single().media.mediaId)
+    }
+
+    @Test fun ocrIsSearchableBeforeVisualIndexAndSurvivesEmbeddingCompletion() = runBlocking {
+        val dao = database.mediaEmbeddingDao()
+        val visual = dao.byId(0)!!.copy(mediaId = 9)
+        val metadata = visual.copy(embedding = byteArrayOf(), embeddingDimension = 0, indexedAt = 0)
+        dao.ensureMetadata(metadata)
+        saveText(9, "hóa đơn")
+        assertEquals(3, dao.count())
+        assertEquals(listOf(9L), repository.search("hoa don", SearchFilters(searchMode = SearchMode.OCR)).results.map { it.media.mediaId })
+        assertTrue(repository.search("bill", SearchFilters()).results.none { it.media.mediaId == 9L })
+        dao.upsert(visual)
+        assertEquals(4, dao.count())
+        assertEquals(listOf(9L), repository.search("hoa don", SearchFilters(searchMode = SearchMode.OCR)).results.map { it.media.mediaId })
+        // A later OCR read must not erase an existing embedding.
+        dao.ensureMetadata(metadata)
+        assertEquals(2, dao.byId(9)!!.embeddingDimension)
+        dao.ensureMetadata(metadata.copy(dateModified = 1))
+        assertTrue(database.photoTextDao().byMediaId(9) == null)
+        assertEquals(0, dao.byId(9)!!.embeddingDimension)
+    }
+
+    @Test fun textUpdatesRemoveOldTermsAndDeletedPhotosCascade() = runBlocking {
+        val dao = database.photoTextDao()
+        saveText(0, "hóa đơn")
+        saveText(0, "tin nhắn")
+        assertTrue(dao.matchingIds(VietnameseText.ftsQuery("hoa don")!!, OcrModelContract.VERSION).isEmpty())
+        assertEquals(listOf(0L), dao.matchingIds(VietnameseText.ftsQuery("tin nhan")!!, OcrModelContract.VERSION))
+        database.mediaEmbeddingDao().deleteIds(listOf(0))
+        assertTrue(dao.indexStates().isEmpty())
+        assertTrue(dao.matchingIds("tin", OcrModelContract.VERSION).isEmpty())
+        // Reusing an ID must not recover old tokens from the FTS index.
+        val parent = database.mediaEmbeddingDao().byId(1)!!
+        database.mediaEmbeddingDao().upsert(parent.copy(mediaId = 0))
+        saveText(0, "")
+        assertTrue(dao.matchingIds("tin", OcrModelContract.VERSION).isEmpty())
+        assertEquals("", dao.byMediaId(0)!!.text)
+    }
+
+    @Test fun textModelVersionAndPhotoModificationInvalidateMatches() = runBlocking {
+        val dao = database.photoTextDao()
+        dao.upsert(PhotoTextEntity(0, "bill", "bill", 0, "old-model"))
+        dao.upsert(PhotoTextEntity(1, "bill", "bill", 10, OcrModelContract.VERSION))
+        assertTrue(dao.matchingIds("bill", OcrModelContract.VERSION).isEmpty())
+    }
+
+    @Test fun readerReusesCachedTextAndHistoryRemembersTextMode() = runBlocking {
+        val file = File.createTempFile("ocr-cache-test", ".png", context.cacheDir)
+        try {
+            val bitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
+            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            bitmap.recycle()
+            val parent = database.mediaEmbeddingDao().byId(0)!!.copy(uri = Uri.fromFile(file).toString())
+            database.mediaEmbeddingDao().upsert(parent)
+            var calls = 0
+            val reader = PhotoTextRepository(context.contentResolver, PhotoTextRecognizer { calls++; "hóa đơn" }, database.photoTextDao(), database.mediaEmbeddingDao())
+            assertEquals("hóa đơn", reader.read(parent.toMediaItem()).text)
+            file.delete()
+            assertEquals("hóa đơn", reader.read(parent.toMediaItem()).text)
+            assertEquals(1, calls)
+            repository.saveHistory("hóa đơn", null, SearchMode.OCR)
+            assertEquals("OCR", repository.history.first().first().searchMode)
+        } finally { file.delete() }
+    }
 
     @Test fun mentionOnlyUsesSavedImageAndContextChangesRanking() = runBlocking {
         assertEquals(setOf(0L, 2L), repository.search("@ALEX", SearchFilters()).results.map { it.media.mediaId }.toSet())
@@ -145,6 +237,11 @@ class PersonalizedSearchTest {
             file.delete()
             assertEquals(0L, repository.search("@mai_anh", SearchFilters()).results.first().media.mediaId)
             assertTrue(embeddedText.isEmpty())
+            // Normal query combines the image vector [1,0] and text vector [0,1].
+            val replacement = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888)
+            file.outputStream().use { replacement.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            replacement.recycle()
+            assertEquals(2L, repository.search("beach", SearchFilters(), imageUri = uri).results.first().media.mediaId)
         } finally {
             file.delete()
         }

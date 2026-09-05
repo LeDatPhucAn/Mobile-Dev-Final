@@ -27,7 +27,22 @@ class PhotoIndexWorker(appContext: Context, params: WorkerParameters) : Coroutin
             val plan = IndexingPlanner.create(media, dao.indexStates())
             plan.deletedIds.chunked(500).forEach { dao.deleteIds(it) }
             val semanticIds = plan.toEmbed.map { it.mediaId }.toHashSet()
-            val pending = IndexingPlanner.facePending(media, container.database.faceEmbeddingDao().indexStates(), semanticIds)
+            val faceIds = IndexingPlanner.facePending(media, container.database.faceEmbeddingDao().indexStates(), semanticIds).map { it.mediaId }.toSet()
+            // OCR needs only metadata, so it can finish before any CLIP or face inference.
+            val textPending = IndexingPlanner.textPending(media, container.database.photoTextDao().indexStates(), emptySet())
+            var textCompleted = media.size - textPending.size
+            var textFailed = 0
+            stateDao.upsert(indexState(textCompleted, media.size, 0, "RUNNING", id = 2))
+            for (item in textPending) {
+                currentCoroutineContext().ensureActive()
+                try { container.photoTextRepository.read(item) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) { textFailed++; Log.w(TAG, "Text indexing failed for ${item.mediaId}", error) }
+                textCompleted++
+                if (textCompleted % 10 == 0) stateDao.upsert(indexState(textCompleted, media.size, textFailed, "RUNNING", id = 2))
+            }
+            stateDao.upsert(indexState(textCompleted, media.size, textFailed, if (textFailed == 0) "COMPLETE" else "INTERRUPTED", id = 2))
+            val pending = media.filter { it.mediaId in semanticIds || it.mediaId in faceIds }
             var completed = media.size - pending.size
             var failed = 0
             stateDao.upsert(indexState(completed, media.size, failed, "RUNNING"))
@@ -59,7 +74,7 @@ class PhotoIndexWorker(appContext: Context, params: WorkerParameters) : Coroutin
                     }
                     bitmap?.recycle()
                     bitmap = null
-                    container.faceIndexRepository.index(item)
+                    if (item.mediaId in faceIds) container.faceIndexRepository.index(item)
                 } catch (error: ModelUnavailableException) {
                     stateDao.upsert(indexState(completed, media.size, failed, "UNAVAILABLE", error.message))
                     return Result.failure(Data.Builder().putString(KEY_ERROR, error.message).build())
@@ -96,8 +111,8 @@ class PhotoIndexWorker(appContext: Context, params: WorkerParameters) : Coroutin
     private fun progress(indexed: Int, total: Int) = Data.Builder()
         .putInt(KEY_INDEXED, indexed).putInt(KEY_TOTAL, total).build()
 
-    private fun indexState(processed: Int, total: Int, failed: Int, status: String, error: String? = null) =
-        IndexingStateEntity(processed = processed, total = total, failed = failed, status = status, error = error, updatedAt = System.currentTimeMillis())
+    private fun indexState(processed: Int, total: Int, failed: Int, status: String, error: String? = null, id: Int = 1) =
+        IndexingStateEntity(id = id, processed = processed, total = total, failed = failed, status = status, error = error, updatedAt = System.currentTimeMillis())
 
     companion object {
         const val UNIQUE_WORK = "photo-library-index"

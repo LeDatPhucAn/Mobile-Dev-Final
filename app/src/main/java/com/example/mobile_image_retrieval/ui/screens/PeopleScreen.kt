@@ -135,7 +135,7 @@ fun PeopleScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     AsyncImage(uri, "Selected reference photo", Modifier.size(120.dp), contentScale = ContentScale.Crop)
-                    OutlinedTextField(
+                    VietnameseTextField(
                         value = name,
                         onValueChange = { name = it; onClearSaveError() },
                         label = { Text("Name") },

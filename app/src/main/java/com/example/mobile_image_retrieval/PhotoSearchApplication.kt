@@ -16,6 +16,8 @@ import com.example.mobile_image_retrieval.data.mediastore.MediaStoreRepository
 import com.example.mobile_image_retrieval.data.repository.SearchRepository
 import com.example.mobile_image_retrieval.data.repository.ReferencePhotoRepository
 import com.example.mobile_image_retrieval.worker.PhotoIndexScheduler
+import com.example.mobile_image_retrieval.ai.BundledPhotoTextRecognizer
+import com.example.mobile_image_retrieval.data.repository.PhotoTextRepository
 
 class PhotoSearchApplication : Application() {
     val container by lazy { AppContainer(this) }
@@ -27,18 +29,20 @@ class AppContainer(application: Application) {
         application,
         PhotoSearchDatabase::class.java,
         "photo-search.db",
-    ).addMigrations(PhotoSearchDatabase.MIGRATION_1_2, PhotoSearchDatabase.MIGRATION_2_3).build()
+    ).addMigrations(PhotoSearchDatabase.MIGRATION_1_2, PhotoSearchDatabase.MIGRATION_2_3, PhotoSearchDatabase.MIGRATION_3_4).build()
     val mediaStoreRepository = MediaStoreRepository(application.contentResolver)
     val imageEmbeddingModel = MobileClipImageEncoder(application)
     val textEmbeddingModel = MobileClipTextEncoder(application)
     val faceAnalyzer = OnnxFaceAnalyzer(application)
     val facePhotoLoader = FacePhotoLoader(application.contentResolver)
     val faceIndexRepository = FaceIndexRepository(facePhotoLoader, faceAnalyzer, database.faceEmbeddingDao())
+    val photoTextRepository = PhotoTextRepository(application.contentResolver, BundledPhotoTextRecognizer(), database.photoTextDao(), database.mediaEmbeddingDao())
     val semanticSearchEngine = SemanticSearchEngine(RoomSearchCandidateSource(database.mediaEmbeddingDao()), RoomFaceCandidateSource(database.faceEmbeddingDao()))
     val referencePhotoRepository = ReferencePhotoRepository(application.contentResolver, imageEmbeddingModel, database.personDao(), faceAnalyzer, facePhotoLoader)
     val searchRepository = SearchRepository(
         textEmbeddingModel, semanticSearchEngine, database.searchHistoryDao(), database.mediaEmbeddingDao(),
         database.personDao(), referencePhotoRepository,
+        database.photoTextDao(),
     )
     val indexScheduler = PhotoIndexScheduler(WorkManager.getInstance(application))
 }

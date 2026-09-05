@@ -41,6 +41,7 @@ data class SearchHistoryEntity(
     val query: String,
     val timestamp: Long,
     val topResultUri: String?,
+    @ColumnInfo(defaultValue = "'HYBRID'") val searchMode: String = "NORMAL",
 )
 
 @Entity(tableName = "indexing_state")
@@ -54,7 +55,13 @@ data class IndexingStateEntity(
     val updatedAt: Long,
 )
 
-data class MediaIndexState(val mediaId: Long, val dateModified: Long)
+data class MediaIndexState(val mediaId: Long, val dateModified: Long, val embeddingDimension: Int = 512)
+
+/** Metadata can be indexed by OCR before a visual embedding exists. */
+fun MediaItem.withoutEmbedding() = MediaEmbeddingEntity(
+    mediaId, uri, mediaType, displayName, dateTaken, dateAdded, dateModified, width, height,
+    mimeType, bucketId, bucketName, byteArrayOf(), 0, 0,
+)
 
 @Entity(tableName = "people", indices = [Index(value = ["handle"], unique = true)])
 data class PersonEntity(

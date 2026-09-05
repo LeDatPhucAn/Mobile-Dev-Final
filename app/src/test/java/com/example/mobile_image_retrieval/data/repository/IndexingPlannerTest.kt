@@ -3,6 +3,8 @@ package com.example.mobile_image_retrieval.data.repository
 import com.example.mobile_image_retrieval.data.db.MediaIndexState
 import com.example.mobile_image_retrieval.data.db.FaceIndexEntity
 import com.example.mobile_image_retrieval.ai.FaceModelContract
+import com.example.mobile_image_retrieval.ai.OcrModelContract
+import com.example.mobile_image_retrieval.data.db.PhotoTextIndexState
 import com.example.mobile_image_retrieval.domain.model.MediaItem
 import com.example.mobile_image_retrieval.domain.model.MediaType
 import org.junit.Assert.assertEquals
@@ -10,6 +12,23 @@ import org.junit.Test
 
 class IndexingPlannerTest {
     private fun media(id: Long, modified: Long) = MediaItem(id, "content://$id", MediaType.IMAGE, null, null, null, modified, null, null, null, null, null)
+
+    @Test fun `OCR metadata remains pending for visual embedding after restart`() {
+        val image = media(1, 2)
+        assertEquals(listOf(image), IndexingPlanner.create(listOf(image), listOf(MediaIndexState(1, 2, 0))).toEmbed)
+        assertEquals(emptyList<MediaItem>(), IndexingPlanner.textPending(listOf(image), listOf(PhotoTextIndexState(1, 2, OcrModelContract.VERSION)), emptySet()))
+    }
+
+    @Test fun `OCR upgrade backfills only text and caches successful empty scans`() {
+        val images = listOf(media(1, 2))
+        assertEquals(emptyList<MediaItem>(), IndexingPlanner.create(images, listOf(MediaIndexState(1, 2))).toEmbed)
+        assertEquals(images, IndexingPlanner.textPending(images, emptyList(), emptySet()))
+        val state = listOf(PhotoTextIndexState(1, 2, OcrModelContract.VERSION))
+        assertEquals(emptyList<MediaItem>(), IndexingPlanner.textPending(images, state, emptySet()))
+        assertEquals(images, IndexingPlanner.textPending(images, state, setOf(1L)))
+        assertEquals(images, IndexingPlanner.textPending(images, listOf(PhotoTextIndexState(1, 2, "old")), emptySet()))
+        assertEquals(listOf(media(1, 3)), IndexingPlanner.textPending(listOf(media(1, 3)), state, emptySet()))
+    }
 
     @Test fun `new photo is embedded`() = assertEquals(listOf(2L), IndexingPlanner.create(listOf(media(1, 1), media(2, 1)), listOf(MediaIndexState(1, 1))).toEmbed.map { it.mediaId })
     @Test fun `unchanged photo is skipped`() = assertEquals(1, IndexingPlanner.create(listOf(media(1, 2)), listOf(MediaIndexState(1, 2))).unchangedCount)
