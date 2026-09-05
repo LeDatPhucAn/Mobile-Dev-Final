@@ -224,7 +224,8 @@ fun SearchHomeScreen(
                 Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                     Column(Modifier.padding(14.dp)) {
                         Text("Indexing queued", fontWeight = FontWeight.SemiBold)
-                        Text("${indexing.indexed} saved · ${(indexing.total - indexing.indexed).coerceAtLeast(0)} remaining. Android will resume when background work is allowed and the battery is not low.", style = MaterialTheme.typography.bodySmall)
+                        Text("${indexing.indexed} saved · ${(indexing.total - indexing.indexed).coerceAtLeast(0)} remaining. " +
+                            (indexing.reason ?: "Android will resume when background work is allowed and the battery is not low."), style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }

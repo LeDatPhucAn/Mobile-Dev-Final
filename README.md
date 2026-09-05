@@ -24,9 +24,9 @@ The bundled ML Kit Latin OCR model supports Vietnamese and is available offline 
 see [OCR model details](app/src/main/assets/models/OCR_MODELS.md). It is packaged by its Android
 dependency, so no additional manual model download is required.
 
-Library indexing performs pending OCR, CLIP and face inference for each photo before moving
-to the next photo. Both search tabs become usable incrementally; visual search does not wait
-for an entire library-wide OCR pass. OCR results are searchable even before a visual embedding exists.
+Library indexing completes the pending CLIP image and face pass first, then scans pending OCR
+text last. The OCR tab explains when it is waiting for photos and faces. Previously cached text
+remains searchable, and the text reader can still recognize an individual photo on demand.
 The two tabs report separate progress. Unchanged text scans (including empty detections) are
 reused. The first full-library scan still decodes up to 2048 pixels per photo to retain small print;
 image decoding and text-recognition timings are logged separately under `PhotoTextIndex`.

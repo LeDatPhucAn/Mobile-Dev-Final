@@ -33,13 +33,12 @@ class PhotoIndexWorker(appContext: Context, params: WorkerParameters) : Coroutin
             plan.deletedIds.chunked(500).forEach { dao.deleteIds(it) }
             val semanticIds = plan.toEmbed.map { it.mediaId }.toHashSet()
             val faceIds = IndexingPlanner.facePending(media, container.database.faceEmbeddingDao().indexStates(), emptySet()).map { it.mediaId }.toSet()
-            // Complete each photo across search modes, preserving independent cached stages.
+            // Finish pending image/face work before the OCR pass; retain each stage's cache.
             val textPending = IndexingPlanner.textPending(media, container.database.photoTextDao().indexStates(), emptySet())
-            val textIds = textPending.map { it.mediaId }.toHashSet()
             var textCompleted = media.size - textPending.size
             var textFailed = 0
-            stateDao.upsert(indexState(textCompleted, media.size, 0, "RUNNING", id = 2))
-            val pending = media.filter { it.mediaId in semanticIds || it.mediaId in faceIds || it.mediaId in textIds }
+            stateDao.upsert(indexState(textCompleted, media.size, 0, if (textPending.isEmpty()) "COMPLETE" else "QUEUED", id = 2))
+            val pending = media.filter { it.mediaId in semanticIds || it.mediaId in faceIds }
             var completed = media.count { it.mediaId !in semanticIds && it.mediaId !in faceIds }
             var failed = 0
             var modelError: String? = null
@@ -48,13 +47,7 @@ class PhotoIndexWorker(appContext: Context, params: WorkerParameters) : Coroutin
             for (item in pending) {
                 currentCoroutineContext().ensureActive()
                 if (isStopped) return Result.retry()
-                if (item.mediaId in textIds) {
-                    try { container.photoTextRepository.read(item); textCompleted++ }
-                    catch (cancelled: CancellationException) { throw cancelled }
-                    catch (error: Exception) { textFailed++; Log.w(TAG, "Text indexing failed for ${item.mediaId}", error) }
-                    stateDao.upsert(indexState(textCompleted, media.size, textFailed, "RUNNING", id = 2))
-                }
-                if (modelError != null || (item.mediaId !in semanticIds && item.mediaId !in faceIds)) continue
+                if (modelError != null) break
                 val totalStarted = SystemClock.elapsedRealtime()
                 var bitmap: android.graphics.Bitmap? = null
                 try {
@@ -95,9 +88,19 @@ class PhotoIndexWorker(appContext: Context, params: WorkerParameters) : Coroutin
                 setProgress(progress(completed, media.size))
                 if (modelError == null) stateDao.upsert(indexState(completed, media.size, failed, "RUNNING"))
             }
-            stateDao.upsert(indexState(textCompleted, media.size, textFailed, if (textFailed == 0) "COMPLETE" else "INTERRUPTED", id = 2))
             stateDao.upsert(indexState(completed, media.size, failed,
                 if (modelError != null) "UNAVAILABLE" else if (failed == 0) "COMPLETE" else "INTERRUPTED", modelError))
+            // OCR still runs if a visual model is unavailable or individual photos failed.
+            stateDao.upsert(indexState(textCompleted, media.size, 0, "RUNNING", id = 2))
+            for (item in textPending) {
+                currentCoroutineContext().ensureActive()
+                if (isStopped) return Result.retry()
+                try { container.photoTextRepository.read(item); textCompleted++ }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) { textFailed++; Log.w(TAG, "Text indexing failed for ${item.mediaId}", error) }
+                stateDao.upsert(indexState(textCompleted, media.size, textFailed, "RUNNING", id = 2))
+            }
+            stateDao.upsert(indexState(textCompleted, media.size, textFailed, if (textFailed == 0) "COMPLETE" else "INTERRUPTED", id = 2))
             // A MediaStore notification can arrive while unique work is already running.
             // Reconcile another snapshot so additions during this pass are not left unindexed.
             val latest = container.mediaStoreRepository.queryImages()

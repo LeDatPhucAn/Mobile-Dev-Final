@@ -367,6 +367,8 @@ class SearchViewModel(private val container: AppContainer, private val savedStat
     private fun ocrStatus(indexed: Int, total: Int): IndexingStatus = when {
         !textCountLoaded || total == 0 || indexed >= total -> IndexingStatus.Idle
         workState == androidx.work.WorkInfo.State.ENQUEUED || workState == androidx.work.WorkInfo.State.BLOCKED -> IndexingStatus.Waiting(indexed, total)
+        workState == androidx.work.WorkInfo.State.RUNNING && ocrWorkerState?.status == "QUEUED" ->
+            IndexingStatus.Waiting(indexed, total, "Photos and faces are being indexed first. Text scanning starts afterward.")
         workState == androidx.work.WorkInfo.State.RUNNING -> IndexingStatus.Running(indexed, total)
         ocrWorkerState?.status == "INTERRUPTED" && ocrWorkerState?.total == total -> IndexingStatus.Interrupted(indexed, total)
         else -> IndexingStatus.Waiting(indexed, total)
